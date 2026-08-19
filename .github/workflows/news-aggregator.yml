@@ -2,6 +2,12 @@ name: News Aggregator
 
 on:
   workflow_dispatch:
+    inputs:
+      scheduled:
+        description: 'Run avviato da cron-job.org (sleep random anti-pattern)'
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: write
@@ -10,6 +16,16 @@ jobs:
   aggregate:
     runs-on: ubuntu-latest
     steps:
+      - name: Random sleep (solo run da cron)
+        if: inputs.scheduled == 'true'
+        run: |
+          # Anti-pattern: partenza a minuto variabile invece del minuto
+          # randomizzato da cron-job.org. 3 avvii/ora (minuti fissi 5/25/45):
+          # sleep 0-15 min per non sovrapporre i run consecutivi.
+          SLEEP=$((RANDOM % 900))
+          echo "Sleeping $SLEEP seconds"
+          sleep $SLEEP
+
       - uses: actions/checkout@v6
         with:
           repository: cemform/cemform.it
@@ -31,8 +47,8 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
         run: |
-          # Il minuto di partenza casuale è gestito da cron-job.org
-          # (job 7779526, randomizzato ogni notte da randomize-cron-minutes).
+          # La partenza casuale è gestita dallo sleep random qui sopra
+          # (solo per i run da cron, input 'scheduled').
           date
           node scripts/news-aggregator.js
 

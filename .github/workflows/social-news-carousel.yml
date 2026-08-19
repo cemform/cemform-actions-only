@@ -42,11 +42,11 @@ jobs:
           node-version: 24
           cache: 'npm'
 
-      - name: Install native dependencies for canvas
-        timeout-minutes: 5
-        run: |
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30
-          sudo apt-get install -y --no-install-recommends build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libpng-dev
+      # NOTA (2026-08-19): step "Install native dependencies for canvas" RIMOSSO.
+      # Il generatore usa @napi-rs/canvas (binari prebuilt via npm, nessuna libreria
+      # di sistema): npm ci scarica @napi-rs/canvas-linux-x64-gnu dal registry.
+      # Lo step apt causava fallimenti ricorrenti per mirror Azure Ubuntu down
+      # (3h26m di hang il 16/08, timeout 5m il 19/08 run 32274872602).
 
       - name: Install dependencies
         run: npm ci

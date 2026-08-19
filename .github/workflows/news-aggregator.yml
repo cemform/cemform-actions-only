@@ -21,8 +21,8 @@ jobs:
         run: |
           # Anti-pattern: ora di pubblicazione variabile invece del minuto
           # randomizzato da cron-job.org. 3 avvii/ora (minuti fissi 5/25/45):
-          # basta 0-3 min di variabilità per non pubblicare mai allo stesso minuto.
-          SLEEP=$((RANDOM % 180))
+          # basta 0-4 min di variabilità per non pubblicare mai allo stesso minuto.
+          SLEEP=$((RANDOM % 240))
           echo "Sleeping $SLEEP seconds"
           sleep $SLEEP
 

@@ -19,10 +19,10 @@ jobs:
       - name: Random sleep (solo run da cron)
         if: inputs.scheduled == 'true'
         run: |
-          # Anti-pattern: partenza a minuto variabile invece del minuto
+          # Anti-pattern: ora di pubblicazione variabile invece del minuto
           # randomizzato da cron-job.org. 3 avvii/ora (minuti fissi 5/25/45):
-          # sleep 0-15 min per non sovrapporre i run consecutivi.
-          SLEEP=$((RANDOM % 900))
+          # basta 0-3 min di variabilità per non pubblicare mai allo stesso minuto.
+          SLEEP=$((RANDOM % 180))
           echo "Sleeping $SLEEP seconds"
           sleep $SLEEP
 

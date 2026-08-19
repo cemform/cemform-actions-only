@@ -60,7 +60,6 @@ jobs:
           rm -f "${{ steps.select.outputs.campaign }}"
         env:
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
-          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 

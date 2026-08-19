@@ -1,0 +1,48 @@
+name: Notizie Sitemap Qualify
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: cemform/cemform.it
+          ref: main
+          token: ${{ secrets.PAT_PRIVATE }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run qualify + apply (delete low-value articles)
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "Trigger: ${{ github.actor }}"
+          date
+          node scripts/qualify-notizie-sitemap.js --apply
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "CEMFORM Bot"
+          git config user.email "cemformazione@gmail.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "notizie: qualificazione sitemap mensile $(date +'%Y-%m-%d') [skip actions]"
+          git pull --rebase -X theirs origin main || { echo "Rebase conflict, aborting"; git rebase --abort; exit 0; }
+          git push

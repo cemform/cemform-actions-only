@@ -1,0 +1,49 @@
+name: Randomize Cron Minutes
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  randomize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update schedules with random minute
+        run: |
+          # 8194355 = social-content-publish (carosello social)
+          # 7779526 = news-auto-publish-github (notizie)
+          # Nota: questo workflow NON accede alla repo privata (solo API cron-job.org)
+          for JOB_ID in 8194355 7779526; do
+            echo "=== Job $JOB_ID ==="
+            MINUTE=$((RANDOM % 60))
+            echo "Generated random minute: $MINUTE"
+
+            RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.CRON_JOB_API_KEY }}" \
+              https://api.cron-job.org/jobs/$JOB_ID)
+            CURRENT_SCHEDULE=$(echo $RESPONSE | jq -c '.jobDetails.schedule')
+            echo "Current schedule: $CURRENT_SCHEDULE"
+
+            NEW_SCHEDULE=$(echo $CURRENT_SCHEDULE | jq --argjson minute $MINUTE '.minutes = [$minute]')
+            echo "New schedule: $NEW_SCHEDULE"
+
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${{ secrets.CRON_JOB_API_KEY }}" \
+              -d "{\"job\":{\"schedule\":$NEW_SCHEDULE}}" \
+              https://api.cron-job.org/jobs/$JOB_ID)
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | head -n-1)
+
+            echo "HTTP Status: $HTTP_CODE"
+            echo "Response: $BODY"
+
+            if [ "$HTTP_CODE" -ne 200 ]; then
+              echo "Error: Failed to update schedule for job $JOB_ID"
+              exit 1
+            fi
+
+            echo "Successfully updated job $JOB_ID to minute $MINUTE"
+          done

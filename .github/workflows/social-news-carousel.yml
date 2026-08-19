@@ -1,0 +1,81 @@
+name: Social News Carousel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  generate-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: cemform/cemform.it
+          ref: main
+          token: ${{ secrets.PAT_PRIVATE }}
+
+      - name: Pull latest
+        run: git pull origin main
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install native dependencies for canvas
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libpng-dev
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Select article
+        id: select
+        run: |
+          node scripts/social-content-engine.js --news --batch 1
+          TODAY=$(date +%Y-%m-%d)
+          CAMP=$(ls -t social/campaigns/$TODAY/news-*.json 2>/dev/null | head -1)
+          if [ -z "$CAMP" ]; then
+            echo "No article selected"
+            echo "slug=" >> $GITHUB_OUTPUT
+          else
+            ART_SLUG=$(node -e "console.log(require('$(pwd)/$CAMP').meta.articleSlug)")
+            echo "slug=$ART_SLUG" >> $GITHUB_OUTPUT
+            echo "campaign=$CAMP" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Generate carousel
+        if: steps.select.outputs.slug != ''
+        run: |
+          set -e
+          node scripts/social-carousel-generator.js --article "${{ steps.select.outputs.slug }}"
+          rm -f "${{ steps.select.outputs.campaign }}"
+        env:
+          IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Publish to Facebook
+        if: steps.select.outputs.slug != ''
+        run: node scripts/social-publisher.js
+        env:
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
+
+      - name: Commit
+        run: |
+          git config user.name "CEMFORM Bot"
+          git config user.email "cemformazione@gmail.com"
+          git add -A
+          git diff --cached --quiet && echo "No new content" && exit 0
+          git commit -m "feat(social): news carousel [skip actions]"
+          git pull --rebase -X theirs origin main || { echo "Rebase conflict, aborting"; git rebase --abort; exit 0; }
+          git push

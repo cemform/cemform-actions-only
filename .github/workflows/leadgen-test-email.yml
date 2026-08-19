@@ -1,0 +1,30 @@
+name: leadgen-test-email
+
+on:
+  workflow_dispatch:
+    inputs:
+      email_to:
+        description: 'Destinatario email di prova'
+        type: string
+        required: true
+
+jobs:
+  send-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: cemform/cemform.it
+          ref: main
+          token: ${{ secrets.PAT_PRIVATE }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Invia email di prova
+        env:
+          TEST_EMAIL_TO: ${{ inputs.email_to }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: node scripts/leadgen-test-email.js

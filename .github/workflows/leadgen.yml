@@ -37,6 +37,7 @@ jobs:
       - name: LeadGen run
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_MIU: ${{ secrets.GEMINI_API_KEY_MIU }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           IMAP_USER: ${{ secrets.SMTP_USER }}

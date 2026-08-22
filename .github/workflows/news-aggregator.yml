@@ -8,6 +8,15 @@ on:
         required: false
         default: 'false'
         type: boolean
+      tier:
+        description: 'Filtro tier: primary (MIM/USR/INPS/sindacati) o aggregator (Orizzonte/Tecnica) o vuoto=tutti'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - primary
+          - aggregator
 
 permissions:
   contents: write
@@ -46,11 +55,17 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          NEWS_TIER: ${{ inputs.tier }}
         run: |
           # La partenza casuale è gestita dallo sleep random qui sopra
           # (solo per i run da cron, input 'scheduled').
           date
-          node scripts/news-aggregator.js
+          echo "Tier filter: ${{ inputs.tier }}"
+          if [ -n "${{ inputs.tier }}" ]; then
+            node scripts/news-aggregator.js --tier=${{ inputs.tier }}
+          else
+            node scripts/news-aggregator.js
+          fi
 
       - name: Commit and push changes
         run: |

@@ -21,6 +21,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: news-aggregator
+  cancel-in-progress: false
+
 jobs:
   aggregate:
     runs-on: ubuntu-latest
@@ -78,5 +82,39 @@ jobs:
             exit 0
           fi
           git commit -m "notizie: aggiornamento automatico $(date +'%Y-%m-%d') [skip actions]"
-          git pull --rebase -X theirs origin main || { echo "Rebase conflict, aborting"; git rebase --abort; exit 0; }
-          git push
+          # Merge-safe push: se il remote è avanzato (race), fai union di .published.json
+          # invece di scartare con -X theirs. La concorrenza è già serializzata via 'concurrency',
+          # ma questo è un paracadute per push falliti.
+          if ! git push; then
+            echo "Push failed, remote avanzato — eseguo merge union di .published.json"
+            git fetch origin main
+            # Salva la nostra versione
+            cp notizie/.published.json /tmp/ours.json
+            git checkout origin/main -- notizie/.published.json || true
+            cp notizie/.published.json /tmp/theirs.json
+            # Union merge via node (dedup per slug, tieni il più vecchio)
+            node -e "
+              const fs=require('fs');
+              const ours=JSON.parse(fs.readFileSync('/tmp/ours.json','utf8'));
+              const theirs=JSON.parse(fs.readFileSync('/tmp/theirs.json','utf8'));
+              const seen=new Set(theirs.map(e=>e.slug));
+              const merged=[...theirs];
+              let added=0;
+              for(const e of ours){ if(!seen.has(e.slug)){ merged.push(e); seen.add(e.slug); added++; } }
+              // Dedup finale (se duplicati interni)
+              const dedup=[]; const s2=new Set();
+              for(const e of merged){ if(s2.has(e.slug)) continue; s2.add(e.slug); dedup.push(e); }
+              dedup.sort((a,b)=>(a.dateObj||'').localeCompare(b.dateObj||''));
+              fs.writeFileSync('notizie/.published.json', JSON.stringify(dedup,null,2)+'\n');
+              console.log('Merge union: theirs '+theirs.length+' + ours '+ours.length+' -> '+dedup.length+' (added '+added+')');
+            "
+            # Rigenera sitemap/feed dopo il merge (senza Gemini, solo pagine)
+            node scripts/news-aggregator.js --regen-pages || true
+            git add -A
+            if git diff --cached --quiet; then
+              echo "Niente da committare dopo il merge"
+              exit 0
+            fi
+            git commit -m "notizie: merge union dopo race [skip actions]" || true
+            git push
+          fi

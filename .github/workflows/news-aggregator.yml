@@ -82,39 +82,57 @@ jobs:
             exit 0
           fi
           git commit -m "notizie: aggiornamento automatico $(date +'%Y-%m-%d') [skip actions]"
-          # Merge-safe push: se il remote è avanzato (race), fai union di .published.json
-          # invece di scartare con -X theirs. La concorrenza è già serializzata via 'concurrency',
-          # ma questo è un paracadute per push falliti.
-          if ! git push; then
-            echo "Push failed, remote avanzato — eseguo merge union di .published.json"
-            git fetch origin main
-            # Salva la nostra versione
-            cp notizie/.published.json /tmp/ours.json
-            git checkout origin/main -- notizie/.published.json || true
-            cp notizie/.published.json /tmp/theirs.json
-            # Union merge via node (dedup per slug, tieni il più vecchio)
-            node -e "
-              const fs=require('fs');
-              const ours=JSON.parse(fs.readFileSync('/tmp/ours.json','utf8'));
-              const theirs=JSON.parse(fs.readFileSync('/tmp/theirs.json','utf8'));
-              const seen=new Set(theirs.map(e=>e.slug));
-              const merged=[...theirs];
-              let added=0;
-              for(const e of ours){ if(!seen.has(e.slug)){ merged.push(e); seen.add(e.slug); added++; } }
-              // Dedup finale (se duplicati interni)
-              const dedup=[]; const s2=new Set();
-              for(const e of merged){ if(s2.has(e.slug)) continue; s2.add(e.slug); dedup.push(e); }
-              dedup.sort((a,b)=>(a.dateObj||'').localeCompare(b.dateObj||''));
-              fs.writeFileSync('notizie/.published.json', JSON.stringify(dedup,null,2)+'\n');
-              console.log('Merge union: theirs '+theirs.length+' + ours '+ours.length+' -> '+dedup.length+' (added '+added+')');
-            "
-            # Rigenera sitemap/feed dopo il merge (senza Gemini, solo pagine)
-            node scripts/news-aggregator.js --regen-pages || true
-            git add -A
-            if git diff --cached --quiet; then
-              echo "Niente da committare dopo il merge"
+          # Push con retry e rebase per race condition (più run concorrenti o push manuali)
+          for i in 1 2 3; do
+            if git push; then
+              echo "Push ok al tentativo $i"
               exit 0
             fi
-            git commit -m "notizie: merge union dopo race [skip actions]" || true
-            git push
-          fi
+            echo "Push fallito (tentativo $i/3) — remote avanzato, eseguo rebase + merge union di .published.json"
+            git fetch origin main
+            # Salva la nostra versione di .published.json prima del rebase
+            cp notizie/.published.json /tmp/ours.json || true
+            # Prova rebase, se fallisce fai merge union manuale
+            if ! git rebase origin/main; then
+              echo "Rebase fallito, eseguo merge union manuale"
+              git rebase --abort || true
+              git fetch origin main
+              cp /tmp/ours.json notizie/.published.json || true
+              cp notizie/.published.json /tmp/ours2.json
+              git checkout origin/main -- notizie/.published.json || true
+              cp notizie/.published.json /tmp/theirs.json
+              node -e "
+                const fs=require('fs');
+                const ours=JSON.parse(fs.readFileSync('/tmp/ours2.json','utf8'));
+                const theirs=JSON.parse(fs.readFileSync('/tmp/theirs.json','utf8'));
+                const seen=new Set(theirs.map(e=>e.slug));
+                const merged=[...theirs];
+                let added=0;
+                for(const e of ours){ if(!seen.has(e.slug)){ merged.push(e); seen.add(e.slug); added++; } }
+                const dedup=[]; const s2=new Set();
+                for(const e of merged){ if(s2.has(e.slug)) continue; s2.add(e.slug); dedup.push(e); }
+                dedup.sort((a,b)=>(a.dateObj||'').localeCompare(b.dateObj||''));
+                fs.writeFileSync('notizie/.published.json', JSON.stringify(dedup,null,2)+'\n');
+                console.log('Merge union: theirs '+theirs.length+' + ours '+ours.length+' -> '+dedup.length+' (added '+added+')');
+              "
+              node scripts/news-aggregator.js --regen-pages || true
+              git add -A
+              if git diff --cached --quiet; then
+                echo "Niente da committare dopo il merge"
+                git rebase --skip || true
+              else
+                git commit -m "notizie: merge union dopo race [skip actions]" || true
+              fi
+            else
+              # Rebase riuscito — rigenera pagine se .published.json è cambiato
+              node scripts/news-aggregator.js --regen-pages || true
+              git add -A
+              if ! git diff --cached --quiet; then
+                git commit -m "notizie: regen dopo rebase [skip actions]" || true
+              fi
+            fi
+            # Riprova push al prossimo loop
+            sleep 2
+          done
+          echo "Push fallito dopo 3 tentativi"
+          exit 1

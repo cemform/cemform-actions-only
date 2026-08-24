@@ -32,9 +32,6 @@ jobs:
       - name: Random sleep (solo run da cron)
         if: inputs.scheduled == 'true'
         run: |
-          # Anti-pattern: ora di pubblicazione variabile invece del minuto
-          # randomizzato da cron-job.org. 3 avvii/ora (minuti fissi 5/25/45):
-          # basta 0-4 min di variabilità per non pubblicare mai allo stesso minuto.
           SLEEP=$((RANDOM % 240))
           echo "Sleeping $SLEEP seconds"
           sleep $SLEEP
@@ -62,8 +59,6 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           NEWS_TIER: ${{ inputs.tier }}
         run: |
-          # La partenza casuale è gestita dallo sleep random qui sopra
-          # (solo per i run da cron, input 'scheduled').
           date
           echo "Tier filter: ${{ inputs.tier }}"
           if [ -n "${{ inputs.tier }}" ]; then
@@ -82,44 +77,67 @@ jobs:
             exit 0
           fi
           git commit -m "notizie: aggiornamento automatico $(date +'%Y-%m-%d') [skip actions]"
-          # Push con retry e rebase per race condition (più run concorrenti o push manuali)
-          for i in 1 2 3; do
+          # Push con retry e merge union per race condition (fix 2026-08-24: gestisce anche data/news-sources.json e aumenta a 5 tentativi)
+          for i in 1 2 3 4 5; do
             if git push; then
               echo "Push ok al tentativo $i"
               exit 0
             fi
-            echo "Push fallito (tentativo $i/3) — remote avanzato, eseguo rebase + merge union di .published.json"
+            echo "Push fallito (tentativo $i/5) — remote avanzato, eseguo rebase + merge union di .published.json e news-sources.json"
             git fetch origin main
-            # Salva la nostra versione di .published.json prima del rebase
-            cp notizie/.published.json /tmp/ours.json || true
-            # Prova rebase, se fallisce fai merge union manuale
+            # Salva nostre versioni prima del rebase
+            cp notizie/.published.json /tmp/ours.json 2>/dev/null || true
+            cp data/news-sources.json /tmp/ours_sources.json 2>/dev/null || true
             if ! git rebase origin/main; then
               echo "Rebase fallito, eseguo merge union manuale"
               git rebase --abort || true
               git fetch origin main
-              cp /tmp/ours.json notizie/.published.json || true
-              cp notizie/.published.json /tmp/ours2.json
-              git checkout origin/main -- notizie/.published.json || true
-              cp notizie/.published.json /tmp/theirs.json
+              # --- merge .published.json ---
+              cp /tmp/ours.json notizie/.published.json 2>/dev/null || true
+              cp notizie/.published.json /tmp/ours2.json 2>/dev/null || true
+              git checkout origin/main -- notizie/.published.json 2>/dev/null || true
+              cp notizie/.published.json /tmp/theirs.json 2>/dev/null || true
               node -e "
                 const fs=require('fs');
-                const ours=JSON.parse(fs.readFileSync('/tmp/ours2.json','utf8'));
-                const theirs=JSON.parse(fs.readFileSync('/tmp/theirs.json','utf8'));
-                const seen=new Set(theirs.map(e=>e.slug));
-                const merged=[...theirs];
-                let added=0;
-                for(const e of ours){ if(!seen.has(e.slug)){ merged.push(e); seen.add(e.slug); added++; } }
-                const dedup=[]; const s2=new Set();
-                for(const e of merged){ if(s2.has(e.slug)) continue; s2.add(e.slug); dedup.push(e); }
-                dedup.sort((a,b)=>(a.dateObj||'').localeCompare(b.dateObj||''));
-                fs.writeFileSync('notizie/.published.json', JSON.stringify(dedup,null,2)+'\n');
-                console.log('Merge union: theirs '+theirs.length+' + ours '+ours.length+' -> '+dedup.length+' (added '+added+')');
+                try{
+                  const ours=JSON.parse(fs.readFileSync('/tmp/ours2.json','utf8'));
+                  const theirs=JSON.parse(fs.readFileSync('/tmp/theirs.json','utf8'));
+                  const seen=new Set(theirs.map(e=>e.slug));
+                  const merged=[...theirs];
+                  let added=0;
+                  for(const e of ours){ if(!seen.has(e.slug)){ merged.push(e); seen.add(e.slug); added++; } }
+                  const dedup=[]; const s2=new Set();
+                  for(const e of merged){ if(s2.has(e.slug)) continue; s2.add(e.slug); dedup.push(e); }
+                  dedup.sort((a,b)=>(a.dateObj||'').localeCompare(b.dateObj||''));
+                  fs.writeFileSync('notizie/.published.json', JSON.stringify(dedup,null,2)+'\n');
+                  console.log('Merge union published: theirs '+theirs.length+' + ours '+ours.length+' -> '+dedup.length+' (added '+added+')');
+                }catch(e){ console.log('Merge published skip: '+e.message); }
+              "
+              # --- merge data/news-sources.json (union per site) ---
+              cp /tmp/ours_sources.json data/news-sources.json 2>/dev/null || true
+              cp data/news-sources.json /tmp/ours2_sources.json 2>/dev/null || true
+              git checkout origin/main -- data/news-sources.json 2>/dev/null || true
+              cp data/news-sources.json /tmp/theirs_sources.json 2>/dev/null || true
+              node -e "
+                const fs=require('fs');
+                try{
+                  const ours=JSON.parse(fs.readFileSync('/tmp/ours2_sources.json','utf8'));
+                  const theirs=JSON.parse(fs.readFileSync('/tmp/theirs_sources.json','utf8'));
+                  const bySite=new Map(theirs.sources.map(s=>[s.site,s]));
+                  let added=0;
+                  for(const s of ours.sources){ if(!bySite.has(s.site)){ bySite.set(s.site,s); added++; } }
+                  const merged={...theirs, sources: Array.from(bySite.values()), updatedAt: new Date().toISOString()};
+                  // ordina per site per stabilità
+                  merged.sources.sort((a,b)=>a.site.localeCompare(b.site));
+                  fs.writeFileSync('data/news-sources.json', JSON.stringify(merged,null,2)+'\n');
+                  console.log('Merge union sources: theirs '+theirs.sources.length+' + ours '+ours.sources.length+' -> '+merged.sources.length+' (added '+added+')');
+                }catch(e){ console.log('Merge sources skip: '+e.message); }
               "
               node scripts/news-aggregator.js --regen-pages || true
               git add -A
               if git diff --cached --quiet; then
                 echo "Niente da committare dopo il merge"
-                git rebase --skip || true
+                git rebase --skip 2>/dev/null || true
               else
                 git commit -m "notizie: merge union dopo race [skip actions]" || true
               fi
@@ -131,8 +149,7 @@ jobs:
                 git commit -m "notizie: regen dopo rebase [skip actions]" || true
               fi
             fi
-            # Riprova push al prossimo loop
-            sleep 2
+            sleep 5
           done
-          echo "Push fallito dopo 3 tentativi"
+          echo "Push fallito dopo 5 tentativi"
           exit 1

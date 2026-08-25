@@ -55,6 +55,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_MIU: ${{ secrets.GEMINI_API_KEY_MIU }}
+          GEMINI_API_KEY_PRO: ${{ secrets.GEMINI_API_KEY_PRO }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           NEWS_TIER: ${{ inputs.tier }}

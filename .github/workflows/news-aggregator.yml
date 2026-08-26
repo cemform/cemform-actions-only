@@ -28,6 +28,7 @@ concurrency:
 jobs:
   aggregate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Random sleep (solo run da cron)
         if: inputs.scheduled == 'true'

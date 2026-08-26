@@ -1,0 +1,43 @@
+name: News Aggregator Retry
+
+on:
+  workflow_run:
+    workflows: ["News Aggregator"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: news-retry-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    # Solo su failure/cancelled, solo primo tentativo, solo workflow_dispatch (cron)
+    if: >-
+      ${{ github.event.workflow_run.conclusion != 'success' &&
+          github.event.workflow_run.conclusion != 'skipped' &&
+          github.event.workflow_run.event == 'workflow_dispatch' &&
+          github.event.workflow_run.run_attempt < 2 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Attesa breve per runner capacity
+        run: sleep 90
+
+      - name: Rerun failed News Aggregator
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_ID="${{ github.event.workflow_run.id }}"
+          CONCL="${{ github.event.workflow_run.conclusion }}"
+          ATTEMPT="${{ github.event.workflow_run.run_attempt }}"
+          echo "Run $RUN_ID conclusione=$CONCL tentativo=$ATTEMPT — rilancio in corso"
+          # API rerun: riusa stessi inputs del run originale
+          gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/rerun" --method POST && echo "Rerun API ok" || {
+            echo "Rerun API fallita, exit 1"
+            exit 1
+          }
+

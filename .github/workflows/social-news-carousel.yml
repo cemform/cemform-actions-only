@@ -56,7 +56,7 @@ jobs:
         run: |
           node scripts/social-content-engine.js --news --batch 1
           TODAY=$(date +%Y-%m-%d)
-          CAMP=$(ls -t social/campaigns/$TODAY/news-*.json 2>/dev/null | head -1)
+          CAMP=$(ls -t social/campaigns/$TODAY/*.json 2>/dev/null | head -1)
           if [ -z "$CAMP" ]; then
             echo "No article selected"
             echo "slug=" >> $GITHUB_OUTPUT

@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Random sleep (solo run da cron)
-        if: inputs.scheduled == 'true'
+        if: inputs.scheduled
         run: |
           # Anti-pattern: orario di pubblicazione variabile (0-30 min)
           # al posto del minuto randomizzato da cron-job.org.

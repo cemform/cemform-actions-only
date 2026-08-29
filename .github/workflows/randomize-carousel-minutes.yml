@@ -1,0 +1,71 @@
+name: Randomize Cron Minutes
+
+on:
+  schedule:
+    - cron: '0 23 * * *' # 01:00 Europe/Rome (23:00 UTC, 00:00 UTC in inverno — varia 1h, accettabile)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  randomize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update schedules with random minute
+        run: |
+          # 8194355 = social-content-publish (2×/giorno: ore 10 e 18)
+          # 8307810 = news-primary-poll (2×/ora: ore 6-22, minuti 5/25)
+          # Nota: questo workflow NON accede alla repo privata (solo API cron-job.org)
+          # Rigenera minuti casuali per entrambi i job mantenendo hours/timezone invariati.
+          set -e
+          for JOB_ID in 8194355 8307810; do
+            echo "=== Job $JOB_ID ==="
+            RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.CRON_JOB_API_KEY }}" \
+              https://api.cron-job.org/jobs/$JOB_ID)
+            CURRENT_SCHEDULE=$(echo "$RESPONSE" | jq -c '.jobDetails.schedule // .schedule')
+            if [ "$CURRENT_SCHEDULE" = "null" ] || [ -z "$CURRENT_SCHEDULE" ]; then
+              echo "WARN: schedule non trovato per job $JOB_ID, response: $RESPONSE"
+              continue
+            fi
+            echo "Current schedule: $CURRENT_SCHEDULE"
+            COUNT=$(echo "$CURRENT_SCHEDULE" | jq '.minutes | length')
+            if [ "$COUNT" = "0" ] || [ "$COUNT" = "null" ]; then
+              COUNT=1
+            fi
+            echo "Minutes count: $COUNT"
+            # Genera COUNT minuti distinti 0-59
+            MINUTES_JSON=$(python3 -c "
+          import random, json, sys
+          count=int(sys.argv[1])
+          mins=set()
+          while len(mins)<count:
+              mins.add(random.randint(0,59))
+          print(json.dumps(sorted(mins)))
+          " "$COUNT")
+            echo "Generated random minutes: $MINUTES_JSON"
+
+            NEW_SCHEDULE=$(echo "$CURRENT_SCHEDULE" | jq --argjson minutes "$MINUTES_JSON" '.minutes = $minutes')
+            echo "New schedule: $NEW_SCHEDULE"
+
+            PATCH_BODY=$(jq -n --argjson sched "$NEW_SCHEDULE" '{"job":{"schedule":$sched}}')
+
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${{ secrets.CRON_JOB_API_KEY }}" \
+              -d "$PATCH_BODY" \
+              https://api.cron-job.org/jobs/$JOB_ID)
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | head -n-1)
+
+            echo "HTTP Status: $HTTP_CODE"
+            echo "Response: $BODY"
+
+            if [ "$HTTP_CODE" -ne 200 ]; then
+              echo "Error: Failed to update schedule for job $JOB_ID"
+              exit 1
+            fi
+
+            echo "Successfully updated job $JOB_ID to minutes $MINUTES_JSON"
+          done

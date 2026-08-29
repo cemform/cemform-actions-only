@@ -2,12 +2,6 @@ name: Social News Carousel
 
 on:
   workflow_dispatch:
-    inputs:
-      scheduled:
-        description: 'Run avviato da cron-job.org (sleep random anti-pattern)'
-        required: false
-        default: 'false'
-        type: boolean
 
 permissions:
   contents: write
@@ -19,15 +13,6 @@ jobs:
   generate-and-publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Random sleep (solo run da cron)
-        if: inputs.scheduled
-        run: |
-          # Anti-pattern: orario di pubblicazione variabile (0-30 min)
-          # al posto del minuto randomizzato da cron-job.org.
-          SLEEP=$((RANDOM % 1800))
-          echo "Sleeping $SLEEP seconds"
-          sleep $SLEEP
-
       - uses: actions/checkout@v6
         with:
           repository: cemform/cemform.it

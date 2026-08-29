@@ -3,6 +3,11 @@ name: News Aggregator
 on:
   workflow_dispatch:
     inputs:
+      scheduled:
+        description: 'Run da cron-job.org (sleep 0-5m anti-pattern)'
+        required: false
+        default: 'false'
+        type: boolean
       tier:
         description: 'Filtro tier: primary (MIM/USR/INPS/sindacati) o aggregator (Orizzonte/Tecnica) o vuoto=tutti'
         required: false
@@ -25,6 +30,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Random sleep (solo run da cron)
+        if: inputs.scheduled == 'true'
+        run: |
+          SLEEP=$((RANDOM % 300))
+          echo "Sleeping $SLEEP seconds (0-5m)"
+          sleep $SLEEP
+
       - uses: actions/checkout@v6
         with:
           repository: cemform/cemform.it

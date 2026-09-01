@@ -79,7 +79,7 @@ jobs:
             exit 0
           fi
           git commit -m "notizie: aggiornamento automatico $(date +'%Y-%m-%d') [skip actions]"
-          # Push con retry e merge union per race condition (fix 2026-08-24: gestisce anche data/news-sources.json e aumenta a 5 tentativi; fix 2026-09-01: 12 tentativi con backoff esponenziale + jitter, cap 60s)
+          # Push con retry e merge union per race condition (fix 2026-08-24: gestisce anche data/news-sources.json e aumenta a 5 tentativi; fix 2026-09-01: 12 tentativi con backoff esponenziale + jitter, cap 60s; fix 2026-09-01b: derivati rigenerabili + feed deterministico)
           for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
             if git push; then
               echo "Push ok al tentativo $i"
@@ -90,6 +90,14 @@ jobs:
             # Salva nostre versioni prima del rebase
             cp notizie/.published.json /tmp/ours.json 2>/dev/null || true
             cp data/news-sources.json /tmp/ours_sources.json 2>/dev/null || true
+            # Fix 2026-09-01b: i file derivati sono rigenerabili — evitiamo CONFLICT su feed/sitemap/archivio
+            # Prima del rebase li allineiamo a origin/main così il rebase non litiga su timestamp/logica template
+            # Verranno rigenerati correttamente da --regen-pages dopo il merge
+            git checkout origin/main -- notizie/feed.xml notizie-sitemap.xml notizie-archive-sitemap.xml notizie/search-index.json 2>/dev/null || true
+            git checkout origin/main -- notizie/index.html 2>/dev/null || true
+            # Archivio mensile è interamente rigenerabile — rimuoviamo conflitto directory
+            rm -rf notizie/archivio 2>/dev/null || true
+            git checkout origin/main -- notizie/archivio 2>/dev/null || true
             if ! git rebase origin/main; then
               echo "Rebase fallito, eseguo merge union manuale"
               git rebase --abort || true

@@ -79,13 +79,13 @@ jobs:
             exit 0
           fi
           git commit -m "notizie: aggiornamento automatico $(date +'%Y-%m-%d') [skip actions]"
-          # Push con retry e merge union per race condition (fix 2026-08-24: gestisce anche data/news-sources.json e aumenta a 5 tentativi)
-          for i in 1 2 3 4 5; do
+          # Push con retry e merge union per race condition (fix 2026-08-24: gestisce anche data/news-sources.json e aumenta a 5 tentativi; fix 2026-09-01: 8 tentativi con backoff esponenziale + jitter)
+          for i in 1 2 3 4 5 6 7 8; do
             if git push; then
               echo "Push ok al tentativo $i"
               exit 0
             fi
-            echo "Push fallito (tentativo $i/5) — remote avanzato, eseguo rebase + merge union di .published.json e news-sources.json"
+            echo "Push fallito (tentativo $i/8) — remote avanzato, eseguo rebase + merge union di .published.json e news-sources.json"
             git fetch origin main
             # Salva nostre versioni prima del rebase
             cp notizie/.published.json /tmp/ours.json 2>/dev/null || true
@@ -151,7 +151,9 @@ jobs:
                 git commit -m "notizie: regen dopo rebase [skip actions]" || true
               fi
             fi
-            sleep 5
+            SLEEP=$((5 * i + RANDOM % 10))
+            echo "Attesa ${SLEEP}s prima del retry $((i+1))/8..."
+            sleep $SLEEP
           done
-          echo "Push fallito dopo 5 tentativi"
+          echo "Push fallito dopo 8 tentativi"
           exit 1

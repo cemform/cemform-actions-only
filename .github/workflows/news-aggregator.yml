@@ -22,7 +22,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: news-aggregator
+  group: push-main
   cancel-in-progress: false
 
 jobs:

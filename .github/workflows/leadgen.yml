@@ -16,6 +16,10 @@ on:
         type: string
         default: ''
 
+concurrency:
+  group: push-main
+  cancel-in-progress: false
+
 jobs:
   leadgen:
     runs-on: ubuntu-latest

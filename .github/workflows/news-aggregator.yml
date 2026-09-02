@@ -79,21 +79,33 @@ jobs:
             exit 0
           fi
           git commit -m "notizie: aggiornamento automatico $(date +'%Y-%m-%d') [skip actions]"
-          # Fix 2026-09-01c: fetch preventivo prima del primo push — evita "rejected" quando Social o un push manuale atterra durante i 4 min di generazione. Log resta visibile, non silenzia errori.
+          # Fix 2026-09-02: risolve race + index sporco (root cause del fallimento 09:01 UTC 12 retry)
+          # - --autostash evita "cannot rebase: Your index contains uncommitted changes" causato dal checkout dei derivati
+          # - fallback reset --hard origin/main rende il commit discendente di origin (prima era divergente → sempre rejected)
+          # - salva/ripristina html+immagini nuovi prima del reset (altrimenti persi)
           echo "Verifica preventiva: fetch origin/main prima del push..."
           git fetch origin main 2>/dev/null || true
           if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
             echo "Origin avanzato durante generazione, rebase preventivo..."
             cp notizie/.published.json /tmp/ours_pre.json 2>/dev/null || true
             cp data/news-sources.json /tmp/ours_sources_pre.json 2>/dev/null || true
+            # salva html/immagini nuovi (se presenti) prima di eventuale reset
+            mkdir -p /tmp/save_html_pre /tmp/save_img_pre
+            git diff --name-only origin/main HEAD -- notizie/*.html 2>/dev/null | while read f; do cp "$f" /tmp/save_html_pre/ 2>/dev/null || true; done
+            git diff --name-only origin/main HEAD -- assets/images/news 2>/dev/null | while read f; do cp "$f" /tmp/save_img_pre/ 2>/dev/null || true; done
             git checkout origin/main -- notizie/feed.xml notizie-sitemap.xml notizie-archive-sitemap.xml notizie/search-index.json 2>/dev/null || true
             git checkout origin/main -- notizie/index.html 2>/dev/null || true
             rm -rf notizie/archivio 2>/dev/null || true
             git checkout origin/main -- notizie/archivio 2>/dev/null || true
-            if ! git rebase origin/main; then
+            if ! git rebase --autostash origin/main; then
               echo "Rebase preventivo fallito, eseguo merge union manuale"
               git rebase --abort || true
               git fetch origin main 2>/dev/null || true
+              # reset hard su origin per rendere history discendente, poi ripristina html nuovi
+              git reset --hard origin/main
+              mkdir -p notizie assets/images/news
+              cp /tmp/save_html_pre/*.html notizie/ 2>/dev/null || true
+              cp /tmp/save_img_pre/* assets/images/news/ 2>/dev/null || true
               cp /tmp/ours_pre.json notizie/.published.json 2>/dev/null || true
               cp notizie/.published.json /tmp/ours2_pre.json 2>/dev/null || true
               git checkout origin/main -- notizie/.published.json 2>/dev/null || true
@@ -133,6 +145,9 @@ jobs:
                 }catch(e){ console.log('Merge preventivo sources skip: '+e.message); }
               "
               node scripts/news-aggregator.js --regen-pages || true
+              # ripristina di nuovo html nuovi dopo regen (regen non ricrea l'html articolo)
+              cp /tmp/save_html_pre/*.html notizie/ 2>/dev/null || true
+              cp /tmp/save_img_pre/* assets/images/news/ 2>/dev/null || true
               git add -A
               if git diff --cached --quiet; then
                 echo "Niente da committare dopo merge preventivo"
@@ -147,7 +162,7 @@ jobs:
               fi
             fi
           fi
-          # Push con retry e merge union per race condition (fix 2026-08-24: gestisce anche data/news-sources.json e aumenta a 5 tentativi; fix 2026-09-01: 12 tentativi con backoff esponenziale + jitter, cap 60s; fix 2026-09-01b: derivati rigenerabili + feed deterministico; fix 2026-09-01c: fetch preventivo)
+          # Push con retry e merge union per race condition (fix 2026-08-24: gestisce anche data/news-sources.json e aumenta a 5 tentativi; fix 2026-09-01: 12 tentativi con backoff esponenziale + jitter, cap 60s; fix 2026-09-01b: derivati rigenerabili + feed deterministico; fix 2026-09-01c: fetch preventivo; fix 2026-09-02: --autostash + reset --hard per history discendente)
           for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
             if git push; then
               echo "Push ok al tentativo $i"
@@ -158,6 +173,10 @@ jobs:
             # Salva nostre versioni prima del rebase
             cp notizie/.published.json /tmp/ours.json 2>/dev/null || true
             cp data/news-sources.json /tmp/ours_sources.json 2>/dev/null || true
+            mkdir -p /tmp/save_html /tmp/save_img
+            rm -rf /tmp/save_html/* /tmp/save_img/* 2>/dev/null || true
+            git diff --name-only origin/main HEAD -- notizie/*.html 2>/dev/null | while read f; do cp "$f" /tmp/save_html/ 2>/dev/null || true; done
+            git diff --name-only origin/main HEAD -- assets/images/news 2>/dev/null | while read f; do cp "$f" /tmp/save_img/ 2>/dev/null || true; done
             # Fix 2026-09-01b: i file derivati sono rigenerabili — evitiamo CONFLICT su feed/sitemap/archivio
             # Prima del rebase li allineiamo a origin/main così il rebase non litiga su timestamp/logica template
             # Verranno rigenerati correttamente da --regen-pages dopo il merge
@@ -166,10 +185,15 @@ jobs:
             # Archivio mensile è interamente rigenerabile — rimuoviamo conflitto directory
             rm -rf notizie/archivio 2>/dev/null || true
             git checkout origin/main -- notizie/archivio 2>/dev/null || true
-            if ! git rebase origin/main; then
+            if ! git rebase --autostash origin/main; then
               echo "Rebase fallito, eseguo merge union manuale"
               git rebase --abort || true
               git fetch origin main
+              # reset hard per rendere HEAD discendente di origin
+              git reset --hard origin/main
+              mkdir -p notizie assets/images/news
+              cp /tmp/save_html/*.html notizie/ 2>/dev/null || true
+              cp /tmp/save_img/* assets/images/news/ 2>/dev/null || true
               # --- merge .published.json ---
               cp /tmp/ours.json notizie/.published.json 2>/dev/null || true
               cp notizie/.published.json /tmp/ours2.json 2>/dev/null || true
@@ -212,6 +236,8 @@ jobs:
                 }catch(e){ console.log('Merge sources skip: '+e.message); }
               "
               node scripts/news-aggregator.js --regen-pages || true
+              cp /tmp/save_html/*.html notizie/ 2>/dev/null || true
+              cp /tmp/save_img/* assets/images/news/ 2>/dev/null || true
               git add -A
               if git diff --cached --quiet; then
                 echo "Niente da committare dopo il merge"

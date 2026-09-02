@@ -70,6 +70,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_MIU: ${{ secrets.GEMINI_API_KEY_MIU }}
+          GEMINI_API_KEY_PRO: ${{ secrets.GEMINI_API_KEY_PRO }}
 
       - name: Generate carousel
         if: steps.select.outputs.slug != ''
@@ -82,6 +83,7 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_MIU: ${{ secrets.GEMINI_API_KEY_MIU }}
+          GEMINI_API_KEY_PRO: ${{ secrets.GEMINI_API_KEY_PRO }}
 
       - name: Publish to Facebook
         if: steps.select.outputs.slug != ''

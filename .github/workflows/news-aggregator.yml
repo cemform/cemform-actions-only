@@ -52,7 +52,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run news aggregator
+      - name: Run news aggregator (genera senza notificare)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_MIU: ${{ secrets.GEMINI_API_KEY_MIU }}
@@ -63,10 +63,12 @@ jobs:
         run: |
           date
           echo "Tier filter: ${{ inputs.tier }}"
+          # --skip-index = crea HTML + .published + sitemap ma NON chiama Indexing/IndexNow
+          # La notifica avverrà solo dopo che Vercel ha deployato (fase 2 con poll live 45s+180s)
           if [ -n "${{ inputs.tier }}" ]; then
-            node scripts/news-aggregator.js --tier=${{ inputs.tier }}
+            node scripts/news-aggregator.js --skip-index --tier=${{ inputs.tier }}
           else
-            node scripts/news-aggregator.js
+            node scripts/news-aggregator.js --skip-index
           fi
 
       - name: Commit and push changes
@@ -260,3 +262,42 @@ jobs:
           done
           echo "Push fallito dopo 12 tentativi"
           exit 1
+
+      # Fase 2: attesa Vercel live + Indexing (poll 45s + 180s, poi Google/IndexNow con coda 48h)
+      # Va eseguita SEMPRE, anche se fase1 non ha pushato: serve a svuotare la coda 48h
+      - name: Notify Google & IndexNow (dopo deploy, con poll live)
+        if: always()
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+        run: |
+          # Poll live + submit coda pending (<48h). Se nessun URL live o coda vuota, exit 0.
+          node scripts/news-aggregator.js --index-only
+
+      - name: Commit and push indexing state (fase 2 — .submitted)
+        if: always()
+        run: |
+          git config user.name "CEMFORM Bot"
+          git config user.email "cemformazione@gmail.com"
+          # Solo .submitted dovrebbe essere cambiato in questa fase (max 1 file)
+          git add notizie/.submitted-indexnow.json 2>/dev/null || true
+          git add notizie/.submitted.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "Nessun aggiornamento .submitted da committare"
+            exit 0
+          fi
+          git commit -m "notizie: indexing state $(date +'%Y-%m-%dT%H:%M:%SZ') [skip actions]"
+          # Push con retry semplice (race raro qui, solo .submitted)
+          for i in 1 2 3 4 5; do
+            if git pull --rebase --autostash origin main 2>/dev/null || { git rebase --abort 2>/dev/null; git fetch origin main; git reset --hard origin/main; git add notizie/.submitted-indexnow.json notizie/.submitted.json 2>/dev/null || true; git commit -m "notizie: indexing state retry $i [skip actions]" 2>/dev/null || true; }; then
+              :
+            fi
+            if git push; then
+              echo "Push fase 2 ok al tentativo $i"
+              exit 0
+            fi
+            echo "Push fase 2 fallito (tentativo $i/5), retry..."
+            git fetch origin main
+            sleep $((3 + RANDOM % 10))
+          done
+          echo "Push fase 2 fallito dopo 5 tentativi (non bloccante)"
+          exit 0

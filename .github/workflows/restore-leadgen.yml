@@ -21,13 +21,20 @@ jobs:
           ref: main
           token: ${{ secrets.PAT_PRIVATE }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
       - name: Download old DB (7.179 centri)
         run: |
           mkdir -p leadgen/data
-          echo "Downloading old DB from tmpfiles.org..."
-          curl -L -o leadgen/data/leadgen.db "https://tmpfiles.org/dl/w6wK45bTjBcr/test-5bf7cd7b4a30ab9d8fba1db35df8483af627b6ae.db"
+          echo "Downloading old DB from raw github..."
+          curl -L -o leadgen/data/leadgen.db "https://raw.githubusercontent.com/cemform/cemform-actions-only/main/leadgen-restore-7179.db"
           ls -lh leadgen/data/leadgen.db
-          sqlite3 leadgen/data/leadgen.db "SELECT count(*) FROM companies;" || node -e "const db=require('better-sqlite3')('leadgen/data/leadgen.db'); console.log('companies',db.prepare('SELECT count(*) FROM companies').pluck().get())"
+          node -e "const db=require('better-sqlite3')('leadgen/data/leadgen.db'); console.log('companies',db.prepare('SELECT count(*) FROM companies').pluck().get()); console.log('contacts',db.prepare('SELECT count(*) FROM contacts').pluck().get())"
 
       - name: Save to cache
         uses: actions/cache/save@v4

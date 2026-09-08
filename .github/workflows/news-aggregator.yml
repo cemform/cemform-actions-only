@@ -30,13 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Random sleep (solo run da cron)
-        if: inputs.scheduled == 'true'
-        run: |
-          SLEEP=$((RANDOM % 300))
-          echo "Sleeping $SLEEP seconds (0-5m)"
-          sleep $SLEEP
-
       - uses: actions/checkout@v6
         with:
           repository: cemform/cemform.it
@@ -48,6 +41,19 @@ jobs:
         with:
           node-version: 24
           cache: 'npm'
+
+      - name: Check daily cap (skip generation se 10/die già raggiunti)
+        id: cap
+        run: |
+          node -e "const s=require('./scripts/seo-guard.js'); const fs=require('fs'); try{const pub=JSON.parse(fs.readFileSync('notizie/.published.json','utf8')); const r=s.checkPublishFrequency(pub); console.log(r.message); if(!r.passed){console.log('CAP_REACHED=1'); process.stdout.write('cap=1');} else {console.log('CAP_OK');}}" | tee /tmp/cap.log
+          if grep -q 'CAP_REACHED' /tmp/cap.log; then echo "cap_reached=true" >> $GITHUB_OUTPUT; echo "Tetto giornaliero raggiunto — generazione saltata, solo sitemap/feed+indexing"; else echo "cap_reached=false" >> $GITHUB_OUTPUT; fi
+
+      - name: Random sleep (solo run da cron, skip se tetto raggiunto)
+        if: inputs.scheduled == 'true' && steps.cap.outputs.cap_reached != 'true'
+        run: |
+          SLEEP=$((RANDOM % 300))
+          echo "Sleeping $SLEEP seconds (0-5m)"
+          sleep $SLEEP
 
       - name: Install dependencies
         run: npm ci

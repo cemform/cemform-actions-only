@@ -16,6 +16,11 @@ on:
         type: string
         default: ''
 
+# B: DB non più in git (PII) -> cache+artifact, non serve contents:write
+permissions:
+  contents: read
+  actions: write
+
 concurrency:
   group: push-main
   cancel-in-progress: false
@@ -30,6 +35,26 @@ jobs:
           repository: cemform/cemform.it
           ref: main
           token: ${{ secrets.PAT_PRIVATE }}
+
+      # --- B: ripristino DB fuori da git (cache + artifact fallback) ---
+      - name: Restore LeadGen DB (cache)
+        uses: actions/cache/restore@v4
+        with:
+          path: leadgen/data/leadgen.db
+          key: leadgen-db-v1
+          restore-keys: |
+            leadgen-db-
+
+      - name: Restore LeadGen DB (artifact fallback)
+        if: hashFiles('leadgen/data/leadgen.db') == ''
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: leadgen.yml
+          branch: main
+          name: leadgen-db
+          path: leadgen/data
+          if_no_artifact_found: warn
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -63,17 +88,19 @@ jobs:
           IMAP_PASS: ${{ secrets.SMTP_PASS }}
         run: node scripts/leadgen-run.js --imap || true
 
-      - name: Commit and push changes
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "CEMFORM Bot"
-          git config user.email "cemformazione@gmail.com"
-          git add leadgen/data/leadgen.db
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "leadgen: aggiornamento automatico DB $(date +'%Y-%m-%d') [skip actions]"
-            git pull --rebase -X theirs origin main || { echo "Rebase conflict, aborting"; git rebase --abort; exit 0; }
-            git push
-          fi
+      # --- B: salvataggio DB fuori da git (cache + artifact) ---
+      - name: Save LeadGen DB to cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: leadgen/data/leadgen.db
+          key: leadgen-db-v1-${{ github.run_id }}
+
+      - name: Save LeadGen DB to artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leadgen-db
+          path: leadgen/data/leadgen.db
+          retention-days: 90
+          if-no-files-found: warn

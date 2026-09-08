@@ -1,0 +1,44 @@
+name: restore-leadgen-db
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: push-main
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: cemform/cemform.it
+          ref: main
+          token: ${{ secrets.PAT_PRIVATE }}
+
+      - name: Download old DB (7.179 centri)
+        run: |
+          mkdir -p leadgen/data
+          echo "Downloading old DB from tmpfiles.org..."
+          curl -L -o leadgen/data/leadgen.db "https://tmpfiles.org/dl/w6wK45bTjBcr/test-5bf7cd7b4a30ab9d8fba1db35df8483af627b6ae.db"
+          ls -lh leadgen/data/leadgen.db
+          sqlite3 leadgen/data/leadgen.db "SELECT count(*) FROM companies;" || node -e "const db=require('better-sqlite3')('leadgen/data/leadgen.db'); console.log('companies',db.prepare('SELECT count(*) FROM companies').pluck().get())"
+
+      - name: Save to cache
+        uses: actions/cache/save@v4
+        with:
+          path: leadgen/data/leadgen.db
+          key: leadgen-db-v1-restore-7179
+
+      - name: Save to artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: leadgen-db
+          path: leadgen/data/leadgen.db
+          retention-days: 90
+          if-no-files-found: error

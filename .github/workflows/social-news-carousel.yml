@@ -86,7 +86,6 @@ jobs:
           GEMINI_API_KEY_PRO: ${{ secrets.GEMINI_API_KEY_PRO }}
 
       - name: Publish to Facebook
-        if: steps.select.outputs.slug != ''
         run: node scripts/social-publisher.js
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}

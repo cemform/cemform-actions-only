@@ -71,6 +71,9 @@ jobs:
           IMAP_PASS: ${{ secrets.SMTP_PASS }}
         run: node scripts/leadgen-run.js --preflight
 
+      - name: Reconcile invii non registrati
+        run: node scripts/leadgen-reconcile.js
+
       - name: LeadGen run
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

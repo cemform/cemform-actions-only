@@ -94,6 +94,9 @@ jobs:
         env:
           IMAP_USER: ${{ secrets.SMTP_USER }}
           IMAP_PASS: ${{ secrets.SMTP_PASS }}
+          # SMTP_USER serve per riconoscere il NOSTRO indirizzo (mai da
+          # bloccare come contatto) nel poll IMAP
+          SMTP_USER: ${{ secrets.SMTP_USER }}
         run: |
           set +e
           node scripts/leadgen-run.js --imap

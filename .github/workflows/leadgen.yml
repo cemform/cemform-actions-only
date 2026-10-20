@@ -59,6 +59,18 @@ jobs:
 
       - run: npm ci
 
+      # --- Preflight credenziali (2026-10-20) ---
+      # Le App Password Gmail vengono REVOCATE a ogni cambio della password
+      # dell'account: senza preflight il job restava VERDE con 0 invii e 15
+      # errori, senza alcuna alert (2 settimane di outreach persi).
+      - name: Preflight credenziali (SMTP + IMAP)
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          IMAP_USER: ${{ secrets.SMTP_USER }}
+          IMAP_PASS: ${{ secrets.SMTP_PASS }}
+        run: node scripts/leadgen-run.js --preflight
+
       - name: LeadGen run
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -82,7 +94,18 @@ jobs:
         env:
           IMAP_USER: ${{ secrets.SMTP_USER }}
           IMAP_PASS: ${{ secrets.SMTP_PASS }}
-        run: node scripts/leadgen-run.js --imap || true
+        run: |
+          set +e
+          node scripts/leadgen-run.js --imap
+          echo "imap_exit=$?" >> "$GITHUB_ENV"
+
+      # Il poll non deve più essere silenzioso: se fallisce, bounce/risposte/
+      # opt-out NON vengono processati e il job deve restare rosso.
+      - name: Fallisci se il poll IMAP è fallito
+        if: always() && env.imap_exit != '' && env.imap_exit != '0'
+        run: |
+          echo "::error::Poll IMAP fallito (exit ${{ env.imap_exit }}) — credenziali o casella non raggiungibili: bounce, risposte e opt-out NON sono stati processati."
+          exit 1
 
       # --- B: salvataggio DB fuori da git (cache + artifact) ---
       - name: Save LeadGen DB to cache

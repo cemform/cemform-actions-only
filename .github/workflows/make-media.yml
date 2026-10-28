@@ -1,0 +1,20 @@
+name: Make IG Media Probe
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "probe or run"
+        required: true
+        default: "probe"
+permissions:
+  contents: read
+jobs:
+  media:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: IG media probe
+        env:
+          MAKE_API_TOKEN: ${{ secrets.MAKE_API_TOKEN }}
+          MODE: ${{ inputs.mode }}
+        run: node media.js

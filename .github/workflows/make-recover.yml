@@ -3,11 +3,15 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "run or cleanup or probe"
+        description: "run, check, cleanup or probe"
         required: true
-        default: "run"
+        default: "check"
       scenario_id:
-        description: "scenario id for cleanup"
+        description: "scenario id"
+        required: false
+        default: ""
+      exec_id:
+        description: "execution id (check mode)"
         required: false
         default: ""
 permissions:
@@ -22,4 +26,5 @@ jobs:
           MAKE_API_TOKEN: ${{ secrets.MAKE_API_TOKEN }}
           MODE: ${{ inputs.mode }}
           SCENARIO_ID: ${{ inputs.scenario_id }}
+          EXEC_ID: ${{ inputs.exec_id }}
         run: node recover.js

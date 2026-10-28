@@ -1,0 +1,65 @@
+name: Make IG Template Probe
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "templates or blueprint"
+        required: true
+        default: "templates"
+      templateUrl:
+        description: "template url (blueprint mode)"
+        required: false
+        default: ""
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe Make public templates for instagram-business modules
+        env:
+          MAKE_API_TOKEN: ${{ secrets.MAKE_API_TOKEN }}
+          MODE: ${{ inputs.mode }}
+          TPL: ${{ inputs.templateUrl }}
+        run: |
+          node - <<'NODE'
+          const token = process.env.MAKE_API_TOKEN;
+          const mode = process.env.MODE || 'templates';
+          const base = 'https://eu1.make.com/api/v2';
+          async function api(path) {
+            const res = await fetch(base + path, { headers: { Authorization: `Token ${token}`, 'Content-Type': 'application/json' } });
+            const text = await res.text();
+            let json = null; try { json = JSON.parse(text); } catch {}
+            return { status: res.status, json, text };
+          }
+          (async () => {
+            if (mode === 'templates') {
+              const q = '/templates/public?usedApps%5B%5D=instagram-business&cols%5B%5D=id&cols%5B%5D=name&cols%5B%5D=url&cols%5B%5D=usedApps&pg%5Blimit%5D=10';
+              const r = await api(q);
+              console.log('TPL HTTP', r.status);
+              console.log('TPL BODY', r.text.slice(0, 3000));
+              return;
+            }
+            const r = await api(`/templates/public/${encodeURIComponent(process.env.TPL)}/blueprint`);
+            console.log('BP HTTP', r.status);
+            if (r.status !== 200) { console.log('BP BODY', r.text.slice(0, 800)); return; }
+            const resp = r.json.response || r.json;
+            let bp = resp.blueprint || resp;
+            if (typeof bp === 'string') bp = JSON.parse(bp);
+            const found = new Set();
+            const detail = [];
+            function walk(list) {
+              for (const m of list || []) {
+                if (String(m.module || '').startsWith('instagram-business:')) {
+                  found.add(m.module);
+                  detail.push({ module: m.module, version: m.version, mapperKeys: Object.keys(m.mapper || {}), paramKeys: Object.keys(m.parameters || {}) });
+                }
+                if (Array.isArray(m.routes)) m.routes.forEach(rt => walk(rt.flow));
+                if (Array.isArray(m.onerror)) walk(m.onerror);
+              }
+            }
+            walk(bp.flow);
+            console.log('IG_MODULES', JSON.stringify([...found]));
+            console.log('IG_DETAIL', JSON.stringify(detail, null, 1));
+          })().catch(e => { console.error('ERR', e.stack || e.message); process.exit(1); });
+          NODE

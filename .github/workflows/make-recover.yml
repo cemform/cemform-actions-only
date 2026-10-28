@@ -25,11 +25,7 @@ jobs:
           const PROD_ID = 6674985;
           const base = 'https://eu1.make.com/api/v2';
           const IMAGES = [1,2,3,4].map(i => `https://www.cemform.it/social/carousel/2026-10-28/agg-f6df0f9e-slide-${i}.png`);
-          const CAPTION = `Politica in classe, la riflessione di Enrico Galiano sul ruolo del docente
-
-Il dibattito sull'opportunità per gli insegnanti di trattare temi politici all'interno delle aule scolastiche chiama in causa il confine delicato tra la trasmissione di valori civici e il rischio di sconfinare nella propaganda partitica. Sul tema è intervenuto lo scrittore e insegnante Enrico Galiano, offrendo una riflessione sul ruolo educativo del docente e sul significato autentico del termine "politica".
-
-#DocentiItaliani #SupplenzeDocenti #NotizieScuola`;
+          const CAPTION = Buffer.from('UG9saXRpY2EgaW4gY2xhc3NlLCBsYSByaWZsZXNzaW9uZSBkaSBFbnJpY28gR2FsaWFubyBzdWwgcnVvbG8gZGVsIGRvY2VudGUKCklsIGRpYmF0dGl0byBzdWxsJ29wcG9ydHVuaXTDoCBwZXIgZ2xpIGluc2VnbmFudGkgZGkgdHJhdHRhcmUgdGVtaSBwb2xpdGljaSBhbGwnaW50ZXJubyBkZWxsZSBhdWxlIHNjb2xhc3RpY2hlIGNoaWFtYSBpbiBjYXVzYSBpbCBjb25maW5lIGRlbGljYXRvIHRyYSBsYSB0cmFzbWlzc2lvbmUgZGkgdmFsb3JpIGNpdmljaSBlIGlsIHJpc2NoaW8gZGkgc2NvbmZpbmFyZSBuZWxsYSBwcm9wYWdhbmRhIHBhcnRpdGljYS4gU3VsIHRlbWEgw6ggaW50ZXJ2ZW51dG8gbG8gc2NyaXR0b3JlIGUgaW5zZWduYW50ZSBFbnJpY28gR2FsaWFubywgb2ZmcmVuZG8gdW5hIHJpZmxlc3Npb25lIHN1bCBydW9sbyBlZHVjYXRpdm8gZGVsIGRvY2VudGUgZSBzdWwgc2lnbmlmaWNhdG8gYXV0ZW50aWNvIGRlbCB0ZXJtaW5lICJwb2xpdGljYSIuCgojRG9jZW50aUl0YWxpYW5pICNTdXBwbGVuemVEb2NlbnRpICNOb3RpemllU2N1b2xh', 'base64').toString('utf8');
           async function api(path, opts = {}) {
             const res = await fetch(base + path, {
               ...opts,

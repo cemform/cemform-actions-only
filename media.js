@@ -6,7 +6,7 @@ const TEAM_ID = 1916320;
 const PROD_ID = 6674985;
 const PROD_HOOK = 3436358;
 const BASE = 'https://eu1.make.com/api/v2';
-const BODY = process.env.BODY || '{{2.array}}';
+const BODY = process.env.BODY || '{{3.text}}';
 
 if (!TOKEN) { console.error('MAKE_API_TOKEN missing'); process.exit(1); }
 
@@ -104,7 +104,7 @@ async function main() {
   };
 
   const respond = {
-    id: 3,
+    id: 4,
     module: 'gateway:WebhookRespond',
     version: 1,
     parameters: {},
@@ -180,9 +180,27 @@ async function main() {
     return;
   }
 
+  const aggregator = {
+    id: 3,
+    module: 'util:TextAggregator',
+    version: 1,
+    parameters: { feeder: 2, rowSeparator: 'other', otherRowSeparator: '\n' },
+    mapper: { value: '<<<POST>>>{{2.id}}<<<TS>>>{{2.timestamp}}<<<URL>>>{{2.permalink}}<<<CAP>>>{{2.caption}}<<<END>>>' },
+    metadata: {
+      expect: [{ name: 'value', type: 'text', label: 'Text', multiline: true }],
+      restore: { feeder: {}, rowSeparator: {} },
+      advanced: true,
+      designer: { x: 600, y: 0 },
+      parameters: [
+        { name: 'rowSeparator', type: 'select', label: 'Row separator', validate: { enum: ['\n', '\t', 'other'] } },
+        { name: 'otherRowSeparator', type: 'text', label: 'Separator' },
+      ],
+    },
+  };
+
   const bp = {
     name: 'CEMFORM IG media probe (temporary)',
-    flow: [trigger, getUserMedia, respond],
+    flow: [trigger, getUserMedia, aggregator, respond],
     metadata: { version: 1, scenario: { dlq: true } },
   };
 

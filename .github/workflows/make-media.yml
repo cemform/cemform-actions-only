@@ -3,9 +3,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "probe or run"
+        description: "probe, diag, hello or run"
         required: true
         default: "probe"
+      body:
+        description: "respond body (run mode)"
+        required: false
+        default: ""
 permissions:
   contents: read
 jobs:
@@ -17,4 +21,5 @@ jobs:
         env:
           MAKE_API_TOKEN: ${{ secrets.MAKE_API_TOKEN }}
           MODE: ${{ inputs.mode }}
+          BODY: ${{ inputs.body }}
         run: node media.js

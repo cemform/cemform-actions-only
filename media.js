@@ -6,6 +6,7 @@ const TEAM_ID = 1916320;
 const PROD_ID = 6674985;
 const PROD_HOOK = 3436358;
 const BASE = 'https://eu1.make.com/api/v2';
+const BODY = process.env.BODY || '{{2.array}}';
 
 if (!TOKEN) { console.error('MAKE_API_TOKEN missing'); process.exit(1); }
 
@@ -107,7 +108,7 @@ async function main() {
     module: 'gateway:WebhookRespond',
     version: 1,
     parameters: {},
-    mapper: { status: '200', body: '{{2.array}}', headers: [] },
+    mapper: { status: '200', body: BODY, headers: [] },
     metadata: {
       expect: [
         { name: 'status', type: 'uinteger', label: 'Status', required: true, validate: { min: 100 } },

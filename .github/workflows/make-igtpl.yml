@@ -38,6 +38,38 @@ jobs:
             return { status: res.status, json, text };
           }
           (async () => {
+            if (mode === 'scan') {
+              const apps = process.env.APP || 'gateway';
+              const list = await api(`/templates/public?usedApps%5B%5D=${apps}&cols%5B%5D=id&cols%5B%5D=name&cols%5B%5D=url&pg%5Blimit%5D=20`);
+              if (list.status !== 200) { console.log('LIST HTTP', list.status, list.text.slice(0, 300)); return; }
+              const tpls = (list.json.templatesPublic || []);
+              for (const t of tpls) {
+                const r = await api(`/templates/public/${encodeURIComponent(t.url)}/blueprint`);
+                if (r.status !== 200) { console.log('SKIP', t.id, r.status); continue; }
+                const resp = r.json.response || r.json;
+                let bp = resp.blueprint || resp;
+                if (typeof bp === 'string') bp = JSON.parse(bp);
+                const names = [];
+                let respond = null;
+                function walk(list, parent) {
+                  for (const m of list || []) {
+                    names.push(m.module);
+                    if (m.module === 'gateway:WebhookRespond') respond = { ...m, _parent: parent };
+                    if (Array.isArray(m.routes)) m.routes.forEach(rt => walk(rt.flow, m.id));
+                    if (Array.isArray(m.onerror)) walk(m.onerror, m.id);
+                  }
+                }
+                walk(bp.flow, null);
+                console.log('TPL', t.id, t.url, '=>', names.join(','));
+                if (respond) {
+                  const copy = JSON.parse(JSON.stringify(respond));
+                  delete copy._parent;
+                  console.log('RESPOND_SHAPE', JSON.stringify(copy));
+                  console.log('RESPOND_PARENT', respond._parent);
+                }
+              }
+              return;
+            }
             if (mode === 'templates') {
               const q = `/templates/public?usedApps%5B%5D=${process.env.APP || 'instagram-business'}&cols%5B%5D=id&cols%5B%5D=name&cols%5B%5D=url&cols%5B%5D=usedApps&pg%5Blimit%5D=10`;
               const r = await api(q);

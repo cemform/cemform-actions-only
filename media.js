@@ -185,7 +185,7 @@ async function main() {
     module: 'util:TextAggregator',
     version: 1,
     parameters: { feeder: 2, rowSeparator: 'other', otherRowSeparator: '\n' },
-    mapper: { value: '<<<POST>>>{{2.id}}<<<TS>>>{{2.timestamp}}<<<URL>>>{{2.permalink}}<<<CAP>>>{{2.caption}}<<<END>>>' },
+    mapper: { value: '<<<POST>>>{{2.id}}<<<TS>>>{{2.timestamp}}<<<TYPE>>>{{2.media_type}}<<<URL>>>{{2.permalink}}<<<CAP>>>{{2.caption}}<<<END>>>' },
     metadata: {
       expect: [{ name: 'value', type: 'text', label: 'Text', multiline: true }],
       restore: { feeder: {}, rowSeparator: {} },

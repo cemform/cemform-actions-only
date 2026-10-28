@@ -62,6 +62,35 @@ async function main() {
     return;
   }
 
+  if (MODE === 'cleanup') {
+    const hr = await api(`/hooks?teamId=${TEAM_ID}&pg%5Blimit%5D=100`);
+    console.log('HOOKS_HTTP', hr.status);
+    const hooks = (hr.json && (hr.json.hooks || hr.json.hook || hr.json)) || [];
+    const list = Array.isArray(hooks) ? hooks : [];
+    for (const h of list) {
+      console.log('HOOK', h.id, JSON.stringify(h.name), 'scenario', h.scenarioId);
+    }
+    for (const h of list) {
+      if (/^CEMFORM (IG media probe|hello|diag)/.test(String(h.name || ''))) {
+        const d = await api(`/hooks/${h.id}?confirmed=true`, { method: 'DELETE' });
+        console.log('HOOK_CLEAN', h.id, d.status);
+      }
+    }
+    const sr = await api(`/scenarios?teamId=${TEAM_ID}&pg%5Blimit%5D=100`);
+    console.log('SCENARIOS_HTTP', sr.status);
+    const scenarios = (sr.json && (sr.json.scenarios || sr.json)) || [];
+    const slist = Array.isArray(scenarios) ? scenarios : [];
+    for (const sc of slist) {
+      if (/^CEMFORM (IG media probe|hello|diag|IG recovery)/.test(String(sc.name || ''))) {
+        console.log('TEMP_SCENARIO', sc.id, JSON.stringify(sc.name), 'active', sc.isActive);
+        await api(`/scenarios/${sc.id}/stop`, { method: 'POST' });
+        const d = await api(`/scenarios/${sc.id}`, { method: 'DELETE' });
+        console.log('SCENARIO_CLEAN', sc.id, d.status);
+      }
+    }
+    return;
+  }
+
   const ch = await api('/hooks', {
     method: 'POST',
     body: JSON.stringify({

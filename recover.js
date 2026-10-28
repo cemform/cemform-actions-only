@@ -136,10 +136,10 @@ async function main() {
     const id = Number(process.env.SCENARIO_ID);
     const exec = process.env.EXEC_ID;
     if (!id || !exec) throw new Error('SCENARIO_ID and EXEC_ID required');
-    const d = await api(\`/scenarios/\${id}/executions/\${exec}\`);
+    const d = await api(`/scenarios/${id}/executions/${exec}`);
     console.log('EXEC HTTP', d.status);
     console.log('EXEC BODY', d.text.slice(0, 5000));
-    const l = await api(\`/scenarios/\${id}/logs?teamId=\${TEAM_ID}&pg%5Blimit%5D=20\`);
+    const l = await api(`/scenarios/${id}/logs?teamId=${TEAM_ID}&pg%5Blimit%5D=20`);
     console.log('LOGS HTTP', l.status);
     console.log('LOGS BODY', l.text.slice(0, 4000));
     return;

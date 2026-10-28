@@ -10,6 +10,10 @@ on:
         description: "template url (blueprint mode)"
         required: false
         default: ""
+      app:
+        description: "app id for templates mode"
+        required: false
+        default: "instagram-business"
 permissions:
   contents: read
 jobs:
@@ -21,6 +25,7 @@ jobs:
           MAKE_API_TOKEN: ${{ secrets.MAKE_API_TOKEN }}
           MODE: ${{ inputs.mode }}
           TPL: ${{ inputs.templateUrl }}
+          APP: ${{ inputs.app }}
         run: |
           node - <<'NODE'
           const token = process.env.MAKE_API_TOKEN;
@@ -34,7 +39,7 @@ jobs:
           }
           (async () => {
             if (mode === 'templates') {
-              const q = '/templates/public?usedApps%5B%5D=instagram-business&cols%5B%5D=id&cols%5B%5D=name&cols%5B%5D=url&cols%5B%5D=usedApps&pg%5Blimit%5D=10';
+              const q = `/templates/public?usedApps%5B%5D=${process.env.APP || 'instagram-business'}&cols%5B%5D=id&cols%5B%5D=name&cols%5B%5D=url&cols%5B%5D=usedApps&pg%5Blimit%5D=10`;
               const r = await api(q);
               console.log('TPL HTTP', r.status);
               console.log('TPL BODY', r.text.slice(0, 3000));

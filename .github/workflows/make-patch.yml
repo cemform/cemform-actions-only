@@ -1,0 +1,130 @@
+name: Make API Patch
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply the retry patch (true/false)"
+        required: true
+        default: "false"
+permissions:
+  contents: read
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add Retry error handlers to Instagram modules
+        env:
+          MAKE_API_TOKEN: ${{ secrets.MAKE_API_TOKEN }}
+          APPLY: ${{ inputs.apply }}
+        run: |
+          node - <<'NODE'
+          const token = process.env.MAKE_API_TOKEN;
+          const apply = String(process.env.APPLY).toLowerCase() === 'true';
+          if (!token) { console.error('NO TOKEN'); process.exit(1); }
+          const scenarioId = '6674985';
+          const base = 'https://eu1.make.com/api/v2';
+          async function api(path, opts = {}) {
+            const res = await fetch(base + path, {
+              ...opts,
+              headers: { Authorization: `Token ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+            });
+            const text = await res.text();
+            let json = null;
+            try { json = JSON.parse(text); } catch {}
+            return { status: res.status, json, text };
+          }
+          const handler = (id, x, y) => ({
+            id,
+            module: 'builtin:Break',
+            version: 1,
+            parameters: {},
+            mapper: { count: '3', retry: true, interval: '1' },
+            metadata: {
+              designer: { x, y },
+              restore: { expect: { retry: { mode: 'chose' } } },
+              expect: [
+                { name: 'retry', type: 'boolean', label: 'Automatically complete execution', required: true },
+                { name: 'count', type: 'uinteger', label: 'Number of attempts', required: true, validate: { max: 10000, min: 1 } },
+                { name: 'interval', type: 'uinteger', label: 'Interval between attempts', required: true, validate: { max: 44640, min: 1 } },
+              ],
+            },
+          });
+          (async () => {
+            const r = await api(`/scenarios/${scenarioId}/blueprint`);
+            if (r.status !== 200) { console.log('GET HTTP', r.status, r.text.slice(0, 500)); process.exit(1); }
+            const resp = r.json.response || r.json;
+            let bp = resp.blueprint;
+            if (typeof bp === 'string') bp = JSON.parse(bp);
+            const before = [];
+            function walk(list, path) {
+              for (const m of list || []) {
+                const ig = String(m.module || '').startsWith('instagram-business:');
+                if (ig) before.push({ id: m.id, module: m.module, path, onerror: (m.onerror || []).length });
+                if (Array.isArray(m.routes)) m.routes.forEach((rt, i) => walk(rt.flow, `${path}/routes[${i}]`));
+                if (Array.isArray(m.onerror)) walk(m.onerror, `${path}/onerror(${m.id})`);
+              }
+            }
+            walk(bp.flow, 'flow');
+            console.log('BEFORE', JSON.stringify(before, null, 1));
+
+            // Add the handler only to Instagram modules; keep ids unique.
+            const used = new Set();
+            function collect(list) {
+              for (const m of list || []) {
+                if (m.id) used.add(m.id);
+                if (Array.isArray(m.routes)) m.routes.forEach(rt => collect(rt.flow));
+                if (Array.isArray(m.onerror)) collect(m.onerror);
+              }
+            }
+            collect(bp.flow);
+            let nextId = 1;
+            const nextFree = () => { while (used.has(nextId)) nextId++; used.add(nextId); return nextId; };
+            let changed = 0;
+            function patch(list, path) {
+              for (const m of list || []) {
+                if (String(m.module || '').startsWith('instagram-business:')) {
+                  if (!Array.isArray(m.onerror) || m.onerror.length === 0) {
+                    const designer = m.metadata && m.metadata.designer ? m.metadata.designer : { x: 0, y: 0 };
+                    m.onerror = [handler(nextFree(), (designer.x || 0) + 300, (designer.y || 0) + 150)];
+                    changed++;
+                  }
+                }
+                if (Array.isArray(m.routes)) m.routes.forEach((rt, i) => patch(rt.flow, `${path}/routes[${i}]`));
+                if (Array.isArray(m.onerror)) patch(m.onerror, `${path}/onerror(${m.id})`);
+              }
+            }
+            patch(bp.flow, 'flow');
+            bp.metadata = bp.metadata || {};
+            bp.metadata.scenario = { ...(bp.metadata.scenario || {}), dlq: true };
+
+            console.log('CHANGED_MODULES', changed, 'BLUEPRINT_VERSION', resp.version);
+            if (!apply) {
+              console.log('DRY RUN — not sending PATCH');
+              return;
+            }
+            const body = { blueprint: JSON.stringify(bp), baseVersion: resp.version };
+            const p = await api(`/scenarios/${scenarioId}`, { method: 'PATCH', body: JSON.stringify(body) });
+            console.log('PATCH HTTP', p.status);
+            console.log('PATCH RESPONSE', JSON.stringify(p.json && (p.json.scenarioVersion || p.json.message || p.json.error) || p.text.slice(0, 300)));
+            if (p.status !== 200) process.exit(1);
+
+            const v = await api(`/scenarios/${scenarioId}/blueprint`);
+            if (v.status !== 200) { console.log('VERIFY GET HTTP', v.status); process.exit(1); }
+            const vresp = v.json.response || v.json;
+            let vbp = vresp.blueprint;
+            if (typeof vbp === 'string') vbp = JSON.parse(vbp);
+            const after = [];
+            function walk2(list, path) {
+              for (const m of list || []) {
+                if (String(m.module || '').startsWith('instagram-business:')) {
+                  after.push({ id: m.id, path, onerror: (m.onerror || []).map(h => ({ id: h.id, module: h.module, mapper: h.mapper })) });
+                }
+                if (Array.isArray(m.routes)) m.routes.forEach((rt, i) => walk2(rt.flow, `${path}/routes[${i}]`));
+                if (Array.isArray(m.onerror)) walk2(m.onerror, `${path}/onerror(${m.id})`);
+              }
+            }
+            walk2(vbp.flow, 'flow');
+            console.log('AFTER', JSON.stringify(after, null, 1));
+            console.log('DLQ', JSON.stringify(vbp.metadata && vbp.metadata.scenario));
+          })().catch(e => { console.error('ERR', e.stack || e.message); process.exit(1); });
+          NODE

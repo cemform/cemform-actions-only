@@ -122,6 +122,31 @@ async function main() {
     },
   };
 
+  if (MODE === 'diag') {
+    let sid = null;
+    try {
+      const cs = await api('/scenarios?confirmed=true', {
+        method: 'POST',
+        body: JSON.stringify({ blueprint: JSON.stringify({ name: 'CEMFORM diag (temp)', flow: [trigger, { ...respond, id: 2, mapper: { status: '200', body: 'diag-ok', headers: [] } }], metadata: { version: 1, scenario: { dlq: true } } }), teamId: TEAM_ID, scheduling: JSON.stringify({ type: 'immediately', maximum_runs_per_minute: 100 }) }),
+      });
+      sid = cs.json.scenario.id;
+      console.log('DIAG_SCENARIO', sid);
+      await api(`/scenarios/${sid}/start`, { method: 'POST' });
+      const h1 = await hookInfo(hook.id);
+      console.log('HOOK_BEFORE', JSON.stringify({ scenarioId: h1.scenarioId, queueCount: h1.queueCount, enabled: h1.enabled, gone: h1.gone }));
+      const res = await fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diag: true }) });
+      console.log('DIAG_HTTP', res.status, JSON.stringify(await res.text()));
+      await new Promise(r => setTimeout(r, 6000));
+      const h2 = await hookInfo(hook.id);
+      console.log('HOOK_AFTER', JSON.stringify({ scenarioId: h2.scenarioId, queueCount: h2.queueCount, enabled: h2.enabled, gone: h2.gone }));
+    } finally {
+      if (sid) { await api(`/scenarios/${sid}/stop`, { method: 'POST' }); const d = await api(`/scenarios/${sid}`, { method: 'DELETE' }); console.log('DIAG_DELETE', d.status); }
+      const dh = await api(`/hooks/${hook.id}?confirmed=true`, { method: 'DELETE' });
+      console.log('HOOK_DELETE', dh.status);
+    }
+    return;
+  }
+
   if (MODE === 'hello') {
     respond.mapper.body = 'hello-from-make';
     respond.mapper.headers = [];

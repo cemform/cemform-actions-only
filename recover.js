@@ -145,6 +145,18 @@ async function main() {
     return;
   }
 
+  if (MODE === 'scenario') {
+    const id = Number(process.env.SCENARIO_ID);
+    if (!id) throw new Error('SCENARIO_ID required');
+    const d = await api(`/scenarios/${id}`);
+    console.log('SCENARIO HTTP', d.status);
+    console.log('SCENARIO BODY', d.text.slice(0, 3000));
+    const q = await api(`/dlqs?teamId=${TEAM_ID}&scenarioId=${id}`);
+    console.log('DLQ HTTP', q.status);
+    console.log('DLQ BODY', q.text.slice(0, 3000));
+    return;
+  }
+
   if (MODE === 'cleanup') {
     const id = Number(process.env.SCENARIO_ID);
     if (!id) throw new Error('SCENARIO_ID missing');

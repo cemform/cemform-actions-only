@@ -122,6 +122,38 @@ async function main() {
     },
   };
 
+  if (MODE === 'hello') {
+    respond.mapper.body = 'hello-from-make';
+    respond.mapper.headers = [];
+    const bpHello = {
+      name: 'CEMFORM hello probe (temporary)',
+      flow: [trigger, { ...respond, id: 2, mapper: { ...respond.mapper } }],
+      metadata: { version: 1, scenario: { dlq: true } },
+    };
+    let sid = null;
+    try {
+      const cs = await api('/scenarios?confirmed=true', {
+        method: 'POST',
+        body: JSON.stringify({ blueprint: JSON.stringify(bpHello), teamId: TEAM_ID, scheduling: JSON.stringify({ type: 'on-demand' }) }),
+      });
+      if (cs.status !== 200) throw new Error(`create hello HTTP ${cs.status}: ${cs.text.slice(0, 800)}`);
+      sid = cs.json.scenario.id;
+      console.log('HELLO_SCENARIO', sid, 'isinvalid', cs.json.scenario.isinvalid);
+      const act = await api(`/scenarios/${sid}/start`, { method: 'POST' });
+      console.log('HELLO_ACTIVATE', act.status);
+      const res = await fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hello: true }) });
+      console.log('HELLO_HTTP', res.status);
+      console.log('HELLO_BODY_START');
+      console.log((await res.text()).slice(0, 5000));
+      console.log('HELLO_BODY_END');
+    } finally {
+      if (sid) { await api(`/scenarios/${sid}/stop`, { method: 'POST' }); const d = await api(`/scenarios/${sid}`, { method: 'DELETE' }); console.log('HELLO_DELETE', d.status); }
+      const dh = await api(`/hooks/${hook.id}?confirmed=true`, { method: 'DELETE' });
+      console.log('HOOK_DELETE', dh.status, dh.text.slice(0, 200));
+    }
+    return;
+  }
+
   const bp = {
     name: 'CEMFORM IG media probe (temporary)',
     flow: [trigger, getUserMedia, respond],
@@ -163,7 +195,7 @@ async function main() {
       const dl = await api(`/scenarios/${scenarioId}`, { method: 'DELETE' });
       console.log('SCENARIO_DELETE HTTP', dl.status);
     }
-    const dh = await api(`/hooks/${hook.id}`, { method: 'DELETE' });
+    const dh = await api(`/hooks/${hook.id}?confirmed=true`, { method: 'DELETE' });
     console.log('HOOK_DELETE HTTP', dh.status);
   }
 }

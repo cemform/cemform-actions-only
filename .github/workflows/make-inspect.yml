@@ -58,6 +58,28 @@ jobs:
               }
             }
             walk(bp.flow, 'flow');
+            const sd = await api(`/scenarios/${scenarioId}`);
+            const sc = (sd.json && sd.json.scenario) || {};
+            console.log('SCENARIO', JSON.stringify({
+              id: sc.id, name: sc.name, isActive: sc.isActive, isPaused: sc.isPaused,
+              isinvalid: sc.isinvalid, hookId: sc.hookId, lastEdit: sc.lastEdit,
+              nextExec: sc.nextExec, dlqCount: sc.dlqCount, scheduling: sc.scheduling,
+            }));
+            let ig = null;
+            function findIg(list) {
+              for (const m of list || []) {
+                if (m.id === 13) ig = m;
+                if (Array.isArray(m.routes)) m.routes.forEach(rt => findIg(rt.flow));
+                if (Array.isArray(m.onerror)) findIg(m.onerror);
+              }
+            }
+            findIg(bp.flow);
+            if (ig) {
+              const params = { ...(ig.parameters || {}) };
+              if (params.__IMTCONN__) params.__IMTCONN__ = '<redacted>';
+              console.log('IG13_PARAMS', JSON.stringify(params));
+              console.log('IG13_MAPPER', JSON.stringify(ig.mapper));
+            }
             console.log(JSON.stringify({
               scenarioId,
               blueprintVersion: resp.version,

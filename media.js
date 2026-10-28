@@ -134,7 +134,7 @@ async function main() {
     try {
       const cs = await api('/scenarios?confirmed=true', {
         method: 'POST',
-        body: JSON.stringify({ blueprint: JSON.stringify(bpHello), teamId: TEAM_ID, scheduling: JSON.stringify({ type: 'on-demand' }) }),
+        body: JSON.stringify({ blueprint: JSON.stringify(bpHello), teamId: TEAM_ID, scheduling: JSON.stringify({ type: 'immediately', maximum_runs_per_minute: 100 }) }),
       });
       if (cs.status !== 200) throw new Error(`create hello HTTP ${cs.status}: ${cs.text.slice(0, 800)}`);
       sid = cs.json.scenario.id;
@@ -167,7 +167,7 @@ async function main() {
       body: JSON.stringify({
         blueprint: JSON.stringify(bp),
         teamId: TEAM_ID,
-        scheduling: JSON.stringify({ type: 'on-demand' }),
+        scheduling: JSON.stringify({ type: 'immediately', maximum_runs_per_minute: 100 }),
       }),
     });
     if (cs.status !== 200) throw new Error(`create scenario HTTP ${cs.status}: ${cs.text.slice(0, 800)}`);

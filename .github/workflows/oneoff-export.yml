@@ -1,0 +1,28 @@
+name: One-off export SMTP secret (encrypted)
+on:
+  workflow_dispatch:
+    inputs:
+      pubkey_b64:
+        description: 'RSA public key PEM base64'
+        required: true
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Encrypt SMTP_PASS
+        env:
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          PUBKEY_B64: ${{ inputs.pubkey_b64 }}
+        run: |
+          set -euo pipefail
+          [ -n "${SMTP_PASS:-}" ] || { echo "manca SMTP_PASS"; exit 1; }
+          printf '%s' "$PUBKEY_B64" | base64 -d > /tmp/pub.pem
+          printf '%s' "$SMTP_PASS" | openssl pkeyutl -encrypt -pubin -inkey /tmp/pub.pem -pkeyopt rsa_padding_mode:oaep -out /tmp/smtp.enc
+          base64 /tmp/smtp.enc > smtp-pass.enc.b64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smtp-pass-enc
+          path: smtp-pass.enc.b64
+          retention-days: 1

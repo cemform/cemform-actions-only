@@ -1,0 +1,63 @@
+name: Sync SMTP env to Vercel
+# Fonte unica della password SMTP: i secret di questo repo (usati anche dal
+# job LeadGen). Questo workflow allinea le env di Vercel usate da api/info.js
+# per creare le bozze Gmail, poi avvia un nuovo deploy production perché le
+# env siano applicate alle funzioni. Non stampa mai i valori.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target Vercel (separati da virgola)'
+        required: false
+        default: 'production,preview,development'
+permissions:
+  contents: read
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upsert SMTP_USER / SMTP_PASS su Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_API_KEY_GH }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          PROJECT_ID: prj_nH151pAGTmmtDARAlYoAb9lrVUJX
+          TEAM_ID: team_0EKu0lAl7P6Y7WS45mRFebo4
+          TARGETS: ${{ inputs.target || 'production,preview,development' }}
+        run: |
+          set -euo pipefail
+          [ -n "${VERCEL_TOKEN:-}" ] || { echo "❌ VERCEL_API_KEY_GH mancante"; exit 1; }
+          if [ -z "${SMTP_USER:-}" ] || [ -z "${SMTP_PASS:-}" ]; then echo "❌ SMTP_USER/SMTP_PASS mancanti"; exit 1; fi
+          for KEY in SMTP_USER SMTP_PASS; do
+            VALUE="${!KEY}"
+            BODY=$(jq -n --arg k "$KEY" --arg v "$VALUE" --arg t "$TARGETS" \
+              '{key:$k, value:$v, type:"encrypted", target:($t|split(",")|map(gsub("^\\s+|\\s+$";"")))}')
+            CODE=$(curl -s -o /tmp/env-resp.json -w '%{http_code}' -X POST \
+              "https://api.vercel.com/v10/projects/${PROJECT_ID}/env?upsert=true&teamId=${TEAM_ID}" \
+              -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$BODY")
+            echo "$KEY -> HTTP $CODE"
+            if [ "$CODE" -ge 300 ]; then echo "Risposta Vercel:"; cat /tmp/env-resp.json; exit 1; fi
+          done
+
+      - name: Redeploy production (applica le env)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_API_KEY_GH }}
+          PROJECT_ID: prj_nH151pAGTmmtDARAlYoAb9lrVUJX
+          TEAM_ID: team_0EKu0lAl7P6Y7WS45mRFebo4
+        run: |
+          set -euo pipefail
+          PROJ=$(curl -s "https://api.vercel.com/v9/projects/${PROJECT_ID}?teamId=${TEAM_ID}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" | jq -r '.name // empty')
+          [ -n "$PROJ" ] || { echo "❌ Progetto Vercel non trovato"; exit 1; }
+          BODY=$(jq -n --arg n "$PROJ" --arg p "$PROJECT_ID" \
+            '{name:$n, project:$p, target:"production", gitSource:{type:"github", org:"cemform", repo:"cemform.it", ref:"main"}}')
+          CODE=$(curl -s -o /tmp/deploy-resp.json -w '%{http_code}' -X POST \
+            "https://api.vercel.com/v13/deployments?forceNew=1&teamId=${TEAM_ID}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+          echo "redeploy -> HTTP $CODE"
+          if [ "$CODE" -ge 300 ]; then echo "Risposta Vercel:"; cat /tmp/deploy-resp.json; exit 1; fi
+          jq -r '"deployment: " + (.uid // .id // "?") + " | " + (.url // "")' /tmp/deploy-resp.json

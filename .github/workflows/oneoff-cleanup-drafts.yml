@@ -1,0 +1,50 @@
+name: One-off cleanup test drafts
+# TEMPORANEO: elimina le bozze Gmail di test (indirizzo +tag) usando i secret
+# SMTP del worker. Non stampa mai la password. Da eliminare dopo l'uso.
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: 'Destinatario delle bozze di test da eliminare'
+        required: true
+        default: 'cemformazione+testdiagnostica@gmail.com'
+permissions:
+  contents: read
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: cemform/cemform.it
+          ref: main
+          token: ${{ secrets.PAT_PRIVATE }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Delete drafts
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          TARGET: ${{ inputs.to }}
+        run: |
+          node --input-type=module -e "
+          import { ImapFlow } from 'imapflow';
+          const c = new ImapFlow({ host: 'imap.gmail.com', port: 993, secure: true, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }, logger: false, connectionTimeout: 15000, socketTimeout: 30000 });
+          c.on('error', () => {});
+          await c.connect();
+          const lock = await c.getMailboxLock('[Gmail]/Bozze');
+          try {
+            const uids = await c.search({ to: process.env.TARGET });
+            console.log('bozze trovate:', uids.length);
+            if (uids.length) {
+              for await (const m of c.fetch(uids, { envelope: true })) console.log(' -', m.envelope?.subject);
+              await c.messageDelete(uids);
+              console.log('eliminate:', uids.length);
+            }
+          } finally { lock.release(); }
+          c.close();
+          "

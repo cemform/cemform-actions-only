@@ -1,10 +1,11 @@
-// Diagnostica one-off: dove arrivano le notifiche Web3Forms e come Gmail
-// assegna il thread a una bozza APPEND con In-Reply-To/References.
-// Output volutamente privo di dati personali (solo date, thread id, domini, booleani).
+// Diagnostica one-off v3: verifica che la bozza creata da /api/info stia nello
+// stesso thread Gmail (X-GM-THRID) della notifica Web3Forms, poi pulisce i test.
+// Nessun dato personale in output: solo date, thread id, booleani, conteggi.
 import { ImapFlow } from 'imapflow';
 
 const user = process.env.SMTP_USER;
 const pass = process.env.SMTP_PASS;
+const target = process.env.TARGET || 'cemformazione+testdiagnostica@gmail.com';
 const client = new ImapFlow({
   host: 'imap.gmail.com', port: 993, secure: true,
   auth: { user, pass }, logger: false,
@@ -14,101 +15,53 @@ client.on('error', (e) => console.log('client error:', String(e?.message || e).s
 
 const flat = [];
 function walk(arr) { for (const b of arr) { flat.push(b); if (b.children) walk(b.children); } }
+const findFolder = (test) => flat.find(test)?.path || null;
 
 await client.connect();
 walk(await client.list());
-const findFolder = (test) => flat.find(test)?.path || null;
 const inbox = 'INBOX';
-const allMail = findFolder((b) => String(b.specialUse || '').toLowerCase().includes('\\all') || /all mail|tutti i messaggi/i.test(b.path));
 const drafts = findFolder((b) => String(b.specialUse || '').toLowerCase().includes('\\drafts') || /(^|\/)(drafts|bozze)$/i.test(b.path));
-console.log('RESOLVED:', { inbox, allMail, drafts });
 
-const since = new Date(Date.now() - 90 * 864e5);
-const queries = [
-  { label: 'from:web3forms', q: { from: 'web3forms' } },
-  { label: 'subject:richiesta info', q: { subject: 'Richiesta info' } },
-  { label: 'subject:nuova richiesta', q: { subject: 'Nuova richiesta' } },
-  { label: 'body:web3forms', q: { body: 'web3forms' } },
-  { label: 'body:access_key', q: { body: 'access_key' } },
-];
-
-for (const folder of [allMail, inbox].filter(Boolean)) {
+const fetchLast = async (folder, query, n, opts = {}) => {
   const lock = await client.getMailboxLock(folder);
   try {
-    for (const { label, q } of queries) {
-      let uids = [];
-      try { uids = await client.search({ since, ...q }); } catch (e) { console.log(folder, label, 'ERR', String(e.message).slice(0, 60)); continue; }
-      console.log(folder, label, '->', uids.length);
-      if (!uids.length) continue;
-      const last = uids.slice(-1)[0];
-      for await (const m of client.fetch(String(last), { envelope: true, threadId: true }, { uid: true })) {
-        const from = String(m.envelope?.from?.[0]?.address || '');
-        console.log('   last:', new Date(m.envelope?.date).toISOString().slice(0, 16), '| domain:', from.split('@')[1] || '-', '| thread:', m.threadId ?? '-', '| subjLen:', String(m.envelope?.subject || '').length);
-      }
+    let uids = [];
+    try { uids = await client.search(query); } catch (e) { console.log(folder, 'search ERR', String(e.message).slice(0, 80)); return []; }
+    const out = [];
+    for await (const m of client.fetch(uids.slice(-n), { envelope: true, threadId: true, internalDate: true, source: true, ...opts }, { uid: true })) {
+      out.push({ uid: m.uid, threadId: m.threadId ? String(m.threadId) : null, date: m.internalDate, subject: String(m.envelope?.subject || ''), raw: m.source ? m.source.toString('utf8') : '' });
     }
+    return out;
   } finally { lock.release(); }
-}
-
-// Verifica threading solo se esiste una notifica reale.
-let candidate = null;
-{
-  const lock = await client.getMailboxLock(allMail || inbox);
-  try {
-    const uids = await client.search({ since, or: [{ from: 'web3forms' }, { subject: 'Richiesta info' }] }).catch(() => []);
-    if (uids.length) {
-      for await (const m of client.fetch(String(uids[uids.length - 1]), { envelope: true, threadId: true, source: true }, { uid: true })) {
-        const raw = m.source ? m.source.toString('utf8') : '';
-        const mm = raw.match(/^Message-ID:\s*(<[^>]+>)/im);
-        const mid = mm ? mm[1].trim() : (m.envelope?.messageId ? `<${String(m.envelope.messageId).replace(/^<|>$/g, '')}>` : null);
-        const refs = (raw.match(/^References:\s*(.+)$/im)?.[1] || '').trim().replace(/\s+/g, ' ');
-        candidate = { uid: m.uid, threadId: m.threadId, subject: String(m.envelope?.subject || ''), msgId: mid, references: refs ? `${refs} ${mid}` : mid };
-      }
-    }
-  } finally { lock.release(); }
-}
-
-if (!candidate || !candidate.msgId) {
-  console.log('NO_NOTIFICATION_FOUND -> threading non testabile su notifica reale');
-  client.close();
-  process.exit(0);
-}
-console.log('NOTIFICATION found | thread:', candidate.threadId ?? '-', '| refs:', !!candidate.references);
-
-const makeDraft = async (label, subject) => {
-  const raw = [
-    'From: CEMFORM <' + user + '>',
-    'To: ' + user,
-    'Subject: ' + subject,
-    'Date: ' + new Date().toUTCString(),
-    'Message-ID: <diag.' + Date.now() + '.' + Math.random().toString(36).slice(2) + '@cemform.it>',
-    'In-Reply-To: ' + candidate.msgId,
-    'References: ' + candidate.references,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    '',
-    'diagnostica threading',
-  ].join('\r\n');
-  const res = await client.append(drafts, raw, ['\\Draft']);
-  let tid = null;
-  if (res?.uid) {
-    const lock = await client.getMailboxLock(drafts);
-    try {
-      for await (const m of client.fetch(String(res.uid), { threadId: true }, { uid: true })) tid = m.threadId;
-    } finally { lock.release(); }
-  }
-  console.log(label, '| draft thread:', tid ?? '-', '| sameThread:', String(tid) === String(candidate.threadId), '| uid:', res?.uid || '-');
-  return res?.uid || null;
 };
 
-const ua = await makeDraft('A_oggetto_diverso', 'Informazioni diagnostica threading');
-const ub = await makeDraft('B_reply_subject', 'Re: ' + candidate.subject.replace(/^re:\s*/i, ''));
+// 1) notifiche Web3Forms (ultime 5 per data di arrivo)
+const notifs = await fetchLast(inbox, { from: 'web3forms' }, 5);
+notifs.sort((a, b) => new Date(b.date) - new Date(a.date));
+console.log('notifications:', notifs.length, '| newest:', notifs[0] ? new Date(notifs[0].date).toISOString().slice(0, 19) : '-', '| thread:', notifs[0]?.threadId ?? '-');
 
-if (ua || ub) {
+// 2) bozze create dal sistema (ultime 5)
+const dr = await fetchLast(drafts, { all: true }, 60);
+const drInfo = dr.filter((m) => /X-CEMFORM-Draft:\s*info-form/i.test(m.raw)).sort((a, b) => new Date(b.date) - new Date(a.date));
+const newestDraft = drInfo[0];
+console.log('cemform drafts:', drInfo.length, '| newest:', newestDraft ? new Date(newestDraft.date).toISOString().slice(0, 19) : '-', '| thread:', newestDraft?.threadId ?? '-', '| subjRe:', /^re\s*:/i.test(newestDraft?.subject || '') ? 'si' : 'no', '| hasRefs:', /^References:/im.test(newestDraft?.raw || '') ? 'si' : 'no', '| toTarget:', (newestDraft?.raw || '').toLowerCase().includes(target.toLowerCase()) ? 'si' : 'no');
+
+if (notifs[0] && newestDraft) {
+  console.log('THREAD MATCH:', String(notifs[0].threadId) === String(newestDraft.threadId));
+}
+
+// 3) cleanup: notifiche e bozze di test
+const inboxHits = await fetchLast(inbox, { from: 'web3forms' }, 40);
+const delInbox = inboxHits.filter((m) => m.raw.toLowerCase().includes(target.toLowerCase())).map((m) => m.uid);
+if (delInbox.length) {
+  const lock = await client.getMailboxLock(inbox);
+  try { await client.messageDelete(delInbox.join(','), { uid: true }); console.log('deleted test notifications:', delInbox.length); } finally { lock.release(); }
+}
+const draftHits = await fetchLast(drafts, { all: true }, 80);
+const delDrafts = draftHits.filter((m) => /X-CEMFORM-Draft:\s*info-form/i.test(m.raw) && m.raw.toLowerCase().includes(target.toLowerCase())).map((m) => m.uid);
+if (delDrafts.length) {
   const lock = await client.getMailboxLock(drafts);
-  try {
-    for (const uid of [ua, ub].filter(Boolean)) await client.messageDelete(String(uid), { uid: true });
-    console.log('cleanup ok');
-  } finally { lock.release(); }
+  try { await client.messageDelete(delDrafts.join(','), { uid: true }); console.log('deleted test drafts:', delDrafts.length); } finally { lock.release(); }
 }
 
 client.close();

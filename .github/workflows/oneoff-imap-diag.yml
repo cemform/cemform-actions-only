@@ -4,6 +4,11 @@ name: One-off IMAP thread diagnostic
 # personali: solo conteggi, date, thread id e booleani. Da eliminare dopo l'uso.
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag univoco da cercare nel body'
+        required: false
+        default: 'latency789'
 permissions:
   contents: read
 jobs:
@@ -29,4 +34,5 @@ jobs:
         env:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          TAG: ${{ inputs.tag || 'latency789' }}
         run: node worker/diag/imap-thread-diag.mjs

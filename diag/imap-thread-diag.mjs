@@ -1,10 +1,11 @@
-// Diagnostica one-off v8: quando arrivano le notifiche del test e con che etichetta.
+// Misura la latenza di consegna della notifica Web3Forms: cerca il tag univoco
+// ogni 5s per 150s e stampa dopo quanti secondi compare. Solo SEARCH (nessun fetch).
 import { ImapFlow } from 'imapflow';
 
 const user = process.env.SMTP_USER;
 const pass = process.env.SMTP_PASS;
-const marker = process.env.MARKER || 'testdiagnostica';
-const client = new ImapFlow({ host: 'imap.gmail.com', port: 993, secure: true, auth: { user, pass }, logger: false, connectionTimeout: 25000, socketTimeout: 60000 });
+const tag = process.env.TAG || 'threadlatency123';
+const client = new ImapFlow({ host: 'imap.gmail.com', port: 993, secure: true, auth: { user, pass }, logger: false, connectionTimeout: 25000, socketTimeout: 45000 });
 client.on('error', (e) => console.log('client error:', String(e?.message || e).slice(0, 120)));
 
 const flat = [];
@@ -12,30 +13,18 @@ function walk(arr) { for (const b of arr) { flat.push(b); if (b.children) walk(b
 await client.connect();
 walk(await client.list());
 const allMail = flat.find((b) => String(b.specialUse || '').toLowerCase().includes('\\all'))?.path || '[Gmail]/Tutti i messaggi';
-const drafts = flat.find((b) => String(b.specialUse || '').toLowerCase().includes('\\drafts'))?.path || '[Gmail]/Bozze';
-
 const lock = await client.getMailboxLock(allMail);
+const t0 = Date.now();
+let foundAt = null;
 try {
-  for (const [label, q] of [['body:marker', { body: marker }], ['to:marker', { to: marker }]]) {
-    const uids = await client.search(q);
-    console.log(label, '->', uids.length, uids.slice(-6).join(','));
-    for (const uid of uids.slice(-6)) {
-      const m = await client.fetchOne(String(uid), { envelope: true, internalDate: true, labels: true }, { uid: true });
-      if (!m) { console.log('  uid', uid, 'fetchOne false'); continue; }
-      console.log('  uid', uid, '|', new Date(m.internalDate).toISOString().slice(0, 19), '| labels', JSON.stringify(m.labels || []), '| fromDom', String(m.envelope?.from?.[0]?.address || '').split('@')[1] || '-', '| subjLen', String(m.envelope?.subject || '').length);
-    }
+  for (let i = 0; i < 30; i++) {
+    let uids = [];
+    try { uids = await client.search({ body: tag }); } catch (e) { console.log('search err', String(e.message).slice(0, 80)); }
+    const elapsed = Math.round((Date.now() - t0) / 1000);
+    console.log(`t=${elapsed}s hits=${uids.length}`);
+    if (uids.length) { foundAt = elapsed; break; }
+    await new Promise((r) => setTimeout(r, 5000));
   }
 } finally { lock.release(); }
-
-const dl = await client.getMailboxLock(drafts);
-try {
-  const uids = await client.search({ all: true });
-  console.log('drafts total:', uids.length, uids.slice(-6).join(','));
-  for (const uid of uids.slice(-6)) {
-    const m = await client.fetchOne(String(uid), { envelope: true, internalDate: true }, { uid: true });
-    if (!m) { console.log('  draft', uid, 'fetchOne false'); continue; }
-    console.log('  draft', uid, '|', new Date(m.internalDate).toISOString().slice(0, 19), '| subjLen', String(m.envelope?.subject || '').length);
-  }
-} finally { dl.release(); }
-
+console.log('RESULT: notification visible after', foundAt === null ? '>150' : foundAt, 's');
 client.close();

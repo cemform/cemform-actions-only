@@ -1,6 +1,6 @@
 // Diagnostica one-off: dove arrivano le notifiche Web3Forms e come Gmail
 // assegna il thread a una bozza APPEND con In-Reply-To/References.
-// Output volutamente privo di dati personali (solo date, thread id, booleani).
+// Output volutamente privo di dati personali (solo date, thread id, domini, booleani).
 import { ImapFlow } from 'imapflow';
 
 const user = process.env.SMTP_USER;
@@ -8,114 +8,107 @@ const pass = process.env.SMTP_PASS;
 const client = new ImapFlow({
   host: 'imap.gmail.com', port: 993, secure: true,
   auth: { user, pass }, logger: false,
-  connectionTimeout: 20000, socketTimeout: 40000,
+  connectionTimeout: 20000, socketTimeout: 45000,
 });
 client.on('error', (e) => console.log('client error:', String(e?.message || e).slice(0, 120)));
 
 const flat = [];
 function walk(arr) { for (const b of arr) { flat.push(b); if (b.children) walk(b.children); } }
 
-const isWeb3 = (env) => {
-  const from = String(env?.from?.[0]?.address || '').toLowerCase();
-  const subj = String(env?.subject || '');
-  return from.includes('web3forms') || /richiesta info|nuova richiesta|new submission/i.test(subj);
-};
-
 await client.connect();
 walk(await client.list());
-console.log('FOLDERS:', flat.map((b) => `${b.path}${b.specialUse ? ` [${b.specialUse}]` : ''}`).join(' | '));
-
 const findFolder = (test) => flat.find(test)?.path || null;
 const inbox = 'INBOX';
 const allMail = findFolder((b) => String(b.specialUse || '').toLowerCase().includes('\\all') || /all mail|tutti i messaggi/i.test(b.path));
-const drafts = findFolder((b) => String(b.specialUse || '').toLowerCase().includes('\\drafts') || /(^|\/)(drafts|bozze)$/i.test(b.path)) || '[Gmail]/Bozze';
+const drafts = findFolder((b) => String(b.specialUse || '').toLowerCase().includes('\\drafts') || /(^|\/)(drafts|bozze)$/i.test(b.path));
 console.log('RESOLVED:', { inbox, allMail, drafts });
 
-const since = new Date(Date.now() - 30 * 864e5);
-let candidate = null;
-for (const folder of [inbox, allMail].filter(Boolean)) {
+const since = new Date(Date.now() - 90 * 864e5);
+const queries = [
+  { label: 'from:web3forms', q: { from: 'web3forms' } },
+  { label: 'subject:richiesta info', q: { subject: 'Richiesta info' } },
+  { label: 'subject:nuova richiesta', q: { subject: 'Nuova richiesta' } },
+  { label: 'body:web3forms', q: { body: 'web3forms' } },
+  { label: 'body:access_key', q: { body: 'access_key' } },
+];
+
+for (const folder of [allMail, inbox].filter(Boolean)) {
   const lock = await client.getMailboxLock(folder);
   try {
-    let uids = [];
-    try { uids = await client.search({ since }); } catch (e) { console.log(folder, 'search err', String(e.message).slice(0, 80)); }
-    console.log(folder, 'since30d:', uids.length);
-    const last = uids.slice(-80);
-    const hits = [];
-    for await (const m of client.fetch(last, { envelope: true, threadId: true }, { uid: true })) {
-      if (isWeb3(m.envelope)) hits.push({ uid: m.uid, threadId: m.threadId, date: m.envelope?.date, subject: String(m.envelope?.subject || ''), from: String(m.envelope?.from?.[0]?.address || '') });
-    }
-    console.log(folder, 'web3-like:', hits.length);
-    if (hits.length) {
-      const lastHit = hits[hits.length - 1];
-      console.log('  latest:', new Date(lastHit.date).toISOString().slice(0, 16), '| thread:', lastHit.threadId ?? '-', '| fromDomain:', lastHit.from.split('@')[1] || '-');
-      if (!candidate) candidate = lastHit;
+    for (const { label, q } of queries) {
+      let uids = [];
+      try { uids = await client.search({ since, ...q }); } catch (e) { console.log(folder, label, 'ERR', String(e.message).slice(0, 60)); continue; }
+      console.log(folder, label, '->', uids.length);
+      if (!uids.length) continue;
+      const last = uids.slice(-1)[0];
+      for await (const m of client.fetch(String(last), { envelope: true, threadId: true }, { uid: true })) {
+        const from = String(m.envelope?.from?.[0]?.address || '');
+        console.log('   last:', new Date(m.envelope?.date).toISOString().slice(0, 16), '| domain:', from.split('@')[1] || '-', '| thread:', m.threadId ?? '-', '| subjLen:', String(m.envelope?.subject || '').length);
+      }
     }
   } finally { lock.release(); }
 }
 
-if (!candidate) {
-  console.log('NO_WEB3_MESSAGE_FOUND -> impossibile testare il threading su una notifica reale');
+// Verifica threading solo se esiste una notifica reale.
+let candidate = null;
+{
+  const lock = await client.getMailboxLock(allMail || inbox);
+  try {
+    const uids = await client.search({ since, or: [{ from: 'web3forms' }, { subject: 'Richiesta info' }] }).catch(() => []);
+    if (uids.length) {
+      for await (const m of client.fetch(String(uids[uids.length - 1]), { envelope: true, threadId: true, source: true }, { uid: true })) {
+        const raw = m.source ? m.source.toString('utf8') : '';
+        const mm = raw.match(/^Message-ID:\s*(<[^>]+>)/im);
+        const mid = mm ? mm[1].trim() : (m.envelope?.messageId ? `<${String(m.envelope.messageId).replace(/^<|>$/g, '')}>` : null);
+        const refs = (raw.match(/^References:\s*(.+)$/im)?.[1] || '').trim().replace(/\s+/g, ' ');
+        candidate = { uid: m.uid, threadId: m.threadId, subject: String(m.envelope?.subject || ''), msgId: mid, references: refs ? `${refs} ${mid}` : mid };
+      }
+    }
+  } finally { lock.release(); }
+}
+
+if (!candidate || !candidate.msgId) {
+  console.log('NO_NOTIFICATION_FOUND -> threading non testabile su notifica reale');
   client.close();
   process.exit(0);
 }
+console.log('NOTIFICATION found | thread:', candidate.threadId ?? '-', '| refs:', !!candidate.references);
 
-// Serve il Message-ID originale dalla fonte completa.
-let msgId = null;
-{
-  const lock = await client.getMailboxLock(inbox);
-  try {
-    for await (const m of client.fetch(String(candidate.uid), { source: true, envelope: true }, { uid: true })) {
-      const raw = m.source ? m.source.toString('utf8') : '';
-      const mm = raw.match(/^Message-ID:\s*(<[^>]+>)/im);
-      msgId = mm ? mm[1].trim() : null;
-      if (!msgId && m.envelope?.messageId) msgId = `<${String(m.envelope.messageId).replace(/^<|>$/g, '')}>`;
-      const refs = (raw.match(/^References:\s*(.+)$/im)?.[1] || '').trim().replace(/\s+/g, ' ');
-      candidate.references = refs ? `${refs} ${msgId}` : msgId;
-    }
-  } finally { lock.release(); }
-}
-console.log('NOTIFICATION Message-ID present:', !!msgId, '| threadId present:', !!candidate.threadId);
-
-const build = (subject, mid, refs) => [
-  'From: CEMFORM <' + user + '>',
-  'To: ' + user,
-  'Subject: ' + subject,
-  'Date: ' + new Date().toUTCString(),
-  'Message-ID: <diag.' + Date.now() + '.' + Math.random().toString(36).slice(2) + '@cemform.it>',
-  'In-Reply-To: ' + mid,
-  'References: ' + refs,
-  'MIME-Version: 1.0',
-  'Content-Type: text/plain; charset=utf-8',
-  '',
-  'diagnostica threading',
-].join('\r\n');
-
-const appended = [];
 const makeDraft = async (label, subject) => {
-  const raw = build(subject, msgId, candidate.references);
+  const raw = [
+    'From: CEMFORM <' + user + '>',
+    'To: ' + user,
+    'Subject: ' + subject,
+    'Date: ' + new Date().toUTCString(),
+    'Message-ID: <diag.' + Date.now() + '.' + Math.random().toString(36).slice(2) + '@cemform.it>',
+    'In-Reply-To: ' + candidate.msgId,
+    'References: ' + candidate.references,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    'diagnostica threading',
+  ].join('\r\n');
   const res = await client.append(drafts, raw, ['\\Draft']);
-  const entry = { label, uid: res?.uid || null, threadId: null };
-  if (entry.uid) {
+  let tid = null;
+  if (res?.uid) {
     const lock = await client.getMailboxLock(drafts);
     try {
-      for await (const m of client.fetch(String(entry.uid), { threadId: true }, { uid: true })) entry.threadId = m.threadId;
+      for await (const m of client.fetch(String(res.uid), { threadId: true }, { uid: true })) tid = m.threadId;
     } finally { lock.release(); }
   }
-  appended.push(entry);
-  console.log(label, '-> draft thread:', entry.threadId ?? '-', '| matches notification:', String(entry.threadId) === String(candidate.threadId));
+  console.log(label, '| draft thread:', tid ?? '-', '| sameThread:', String(tid) === String(candidate.threadId), '| uid:', res?.uid || '-');
+  return res?.uid || null;
 };
 
-// A: oggetto diverso (come fa oggi Gemini). B: "Re: <oggetto notifica>" (come il tasto Rispondi).
-await makeDraft('A_oggetto_diverso', 'Informazioni diagnostica threading');
-await makeDraft('B_reply_subject', 'Re: ' + candidate.subject.replace(/^re:\s*/i, ''));
+const ua = await makeDraft('A_oggetto_diverso', 'Informazioni diagnostica threading');
+const ub = await makeDraft('B_reply_subject', 'Re: ' + candidate.subject.replace(/^re:\s*/i, ''));
 
-// Pulizia: rimuove le due bozze di test.
-const lock = await client.getMailboxLock(drafts);
-try {
-  for (const entry of appended) {
-    if (entry.uid) await client.messageDelete(String(entry.uid), { uid: true });
-  }
-  console.log('cleanup drafts:', appended.filter((e) => e.uid).length);
-} finally { lock.release(); }
+if (ua || ub) {
+  const lock = await client.getMailboxLock(drafts);
+  try {
+    for (const uid of [ua, ub].filter(Boolean)) await client.messageDelete(String(uid), { uid: true });
+    console.log('cleanup ok');
+  } finally { lock.release(); }
+}
 
 client.close();

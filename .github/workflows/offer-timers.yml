@@ -37,5 +37,33 @@ jobs:
             exit 0
           fi
           git commit -m "timer: rinnovo automatico offerte $(date +'%Y-%m-%d') [skip ci]"
-          git pull --rebase -X theirs origin main || { echo "Rebase conflict, aborting"; git rebase --abort; exit 0; }
-          git push
+          # Push con retry: GitHub può rispondere con "fatal error in commit_refs" (server-side transitorio)
+          LAST_ERR=""
+          for i in 1 2 3 4 5; do
+            if git pull --rebase -X theirs origin main; then
+              if PUSH_OUT=$(git push 2>&1); then
+                echo "$PUSH_OUT"
+                echo "✅ push ok al tentativo $i"
+                LAST_ERR=""
+                break
+              fi
+              echo "$PUSH_OUT"
+              LAST_ERR="$PUSH_OUT"
+            else
+              echo "⚠️ pull/rebase fallito al tentativo $i"
+              git rebase --abort 2>/dev/null || true
+              LAST_ERR="pull/rebase failed"
+            fi
+            SLEEP=$((5 * (1 << (i-1)) + RANDOM % 10))
+            if [ "$SLEEP" -gt 60 ]; then SLEEP=60; fi
+            echo "Attesa ${SLEEP}s prima del retry $((i+1))/5..."
+            sleep "$SLEEP"
+          done
+          if [ -n "$LAST_ERR" ]; then
+            if echo "$LAST_ERR" | grep -q "fatal error in commit_refs"; then
+              echo "::warning::Push rifiutato da GitHub (fatal error in commit_refs) dopo 5 tentativi; timer rimandati al prossimo run."
+            else
+              echo "::error::Push fallito dopo 5 tentativi per un errore non transitorio."
+              exit 1
+            fi
+          fi
